@@ -1,0 +1,48 @@
+{
+  "name": "scratch-teacher-workbench",
+  "version": "0.1.0",
+  "description": "Scratch 教师个人工作台 - 备课/授课/课后/事务管理一体化桌面软件",
+  "author": "icedcoke23",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "electron-rebuild -f -w better-sqlite3 || echo \"rebuild skipped\"",
+    "build:win": "electron-vite build && electron-builder --win --x64",
+    "build:dir": "electron-vite build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.1",
+    "@electron-toolkit/utils": "^3.0.0",
+    "better-sqlite3": "^11.3.0",
+    "dayjs": "^1.11.13",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@ant-design/icons-vue": "^7.0.1",
+    "@electron-toolkit/tsconfig": "^1.0.0",
+    "@electron/rebuild": "^3.6.0",
+    "@vitejs/plugin-vue": "^5.1.4",
+    "@vitejs/plugin-vue-jsx": "^4.0.1",
+    "ant-design-vue": "^4.2.6",
+    "electron": "^31.7.0",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "^2.3.0",
+    "pinia": "^2.2.4",
+    "typescript": "^5.5.4",
+    "unplugin-auto-import": "^0.18.3",
+    "unplugin-vue-components": "^0.27.4",
+    "vite": "^5.4.8",
+    "vue": "^3.5.12",
+    "vue-router": "^4.4.5",
+    "vue-tsc": "^2.1.6"
+  },
+  "optionalDependencies": {
+    "@nut-tree/nut-js": "^4.2.0"
+  }
+}

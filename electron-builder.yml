@@ -1,0 +1,31 @@
+appId: com.icedcoke23.workbench
+productName: Scratch教学工作台
+directories:
+  buildResources: build
+  output: release/${version}
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.{ts,map}'
+  - '!**/.eslintrc*'
+extraResources:
+  - from: out/main/better_sqlite3.node
+    to: better_sqlite3.node
+    filter: ['**/*']
+asarUnpack:
+  - resources/**
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Scratch教学工作台
+  createDesktopShortcut: true
+mac:
+  target: []
+linux:
+  target: []

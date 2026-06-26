@@ -1,0 +1,17 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+.DS_Store
+.env
+.env.local
+*.local
+.vite/
+scratch-gui/
+_ref/
+data/
+  workbench.db
+  workbench.db-journal
+  resources/
+  exports/
