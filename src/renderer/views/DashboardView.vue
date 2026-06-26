@@ -1,178 +1,3 @@
-<template>
-  <div class="page-container">
-    <!-- 顶部统计卡片 -->
-    <a-row :gutter="16" class="stat-row">
-      <a-col :span="6">
-        <a-card class="stat-card" :bordered="false">
-          <div class="num">{{ stats.totalStudents }}</div>
-          <div class="label"><TeamOutlined /> 学生数</div>
-        </a-card>
-      </a-col>
-      <a-col :span="6">
-        <a-card class="stat-card" :bordered="false">
-          <div class="num">{{ stats.totalClasses }}</div>
-          <div class="label"><BankOutlined /> 班级数</div>
-        </a-card>
-      </a-col>
-      <a-col :span="6">
-        <a-card class="stat-card" :bordered="false">
-          <div class="num">{{ stats.weekLessonCount }}</div>
-          <div class="label"><CalendarOutlined /> 本周课时</div>
-        </a-card>
-      </a-col>
-      <a-col :span="6">
-        <a-card class="stat-card" :bordered="false">
-          <div class="num">{{ stats.pendingFeedbackCount }}</div>
-          <div class="label"><BellOutlined /> 待反馈数</div>
-        </a-card>
-      </a-col>
-    </a-row>
-
-    <!-- AI 课表导入 -->
-    <a-card title="AI 课表导入" class="section-card">
-      <a-textarea
-        v-model:value="scheduleText"
-        placeholder="粘贴课表文本（班级、科目、时间、学生名单等），AI 将自动解析结构..."
-        :rows="4"
-        allow-clear
-      />
-      <a-space class="schedule-actions">
-        <a-button type="primary" :loading="parsing" @click="onParseText">
-          <ThunderboltOutlined /> 解析文本
-        </a-button>
-        <a-button :loading="parsing" @click="onParseImage">
-          <PictureOutlined /> 上传截图解析
-        </a-button>
-      </a-space>
-
-      <div v-if="parseResult" class="parse-result">
-        <div class="parse-result-header">
-          <span class="parse-result-title">
-            解析结果（共 {{ parseResult.classes.length }} 个班级）
-          </span>
-          <a-button type="primary" :loading="importing" @click="onConfirmImport">
-            <CheckOutlined /> 确认导入
-          </a-button>
-        </div>
-        <a-table
-          :columns="scheduleColumns"
-          :data-source="parseResult.classes"
-          row-key="name"
-          size="small"
-          :pagination="false"
-          bordered
-        >
-          <template #bodyCell="{ column, record, index }">
-            <template v-if="column.dataIndex === 'idx'">{{ index + 1 }}</template>
-            <template v-else-if="column.dataIndex === 'weekday'">
-              {{ weekdayText(record.weekday) }}
-            </template>
-            <template v-else-if="column.dataIndex === 'time'">
-              {{ record.startTime }} - {{ record.endTime }}
-            </template>
-            <template v-else-if="column.dataIndex === 'studentCount'">
-              {{ record.students.length }}
-            </template>
-          </template>
-        </a-table>
-      </div>
-    </a-card>
-
-    <!-- 智能待办看板 -->
-    <a-card title="智能待办" class="section-card">
-      <template #extra>
-        <a-space>
-          <a-button size="small" :loading="regenerating" @click="onRegenerate">
-            <ReloadOutlined /> 重新生成
-          </a-button>
-          <a-button size="small" type="primary" @click="openAddTodo">
-            <PlusOutlined /> 新增
-          </a-button>
-        </a-space>
-      </template>
-
-      <div class="kanban">
-        <div
-          v-for="col in todoColumns"
-          :key="col.status"
-          class="kanban-col"
-          :class="{ 'drag-over': dragOverCol === col.status }"
-          @dragover.prevent="dragOverCol = col.status"
-          @dragleave="onColDragLeave(col.status)"
-          @drop="onDrop(col.status)"
-        >
-          <div class="kanban-col-header">
-            <span class="kanban-col-title">
-              <span class="dot" :class="`dot-${col.status}`"></span>
-              {{ col.title }}
-            </span>
-            <a-badge :count="col.list.length" :number-style="{ backgroundColor: col.color }" />
-          </div>
-          <div class="kanban-list">
-            <div
-              v-for="todo in col.list"
-              :key="todo.id"
-              class="todo-card"
-              draggable="true"
-              @dragstart="onDragStart($event, todo.id)"
-            >
-              <div class="todo-card-head">
-                <a-tag :color="typeColor(todo.type)" class="todo-tag">
-                  {{ typeText(todo.type) }}
-                </a-tag>
-                <DeleteOutlined class="todo-delete" @click="onRemoveTodo(todo.id)" />
-              </div>
-              <div class="todo-title">{{ todo.title }}</div>
-              <div v-if="todo.dueAt" class="todo-due">
-                <ClockCircleOutlined /> {{ formatTime(todo.dueAt) }}
-              </div>
-            </div>
-            <a-empty v-if="col.list.length === 0" :image="emptyImage" description="暂无待办" />
-          </div>
-        </div>
-      </div>
-    </a-card>
-
-    <!-- 本周课程 -->
-    <a-card title="本周课程" class="section-card">
-      <a-empty v-if="weekLessons.length === 0" description="本周暂无课程" />
-      <a-timeline v-else>
-        <a-timeline-item
-          v-for="lesson in weekLessons"
-          :key="lesson.id"
-          :color="lessonColor(lesson)"
-        >
-          <div class="lesson-item">
-            <span class="lesson-time">{{ formatLessonTime(lesson.startTime) }}</span>
-            <span class="lesson-class">{{ lesson.className || '未命名班级' }}</span>
-            <a-tag v-if="lesson.subject" color="blue">{{ lesson.subject }}</a-tag>
-            <a-tag v-if="lesson.feedbackSent" color="green">已反馈</a-tag>
-            <a-tag v-else-if="lesson.status === 'finished'" color="orange">待反馈</a-tag>
-            <a-tag v-if="lesson.status === 'teaching'" color="processing">授课中</a-tag>
-          </div>
-        </a-timeline-item>
-      </a-timeline>
-    </a-card>
-
-    <!-- 新增待办 Modal -->
-    <a-modal
-      v-model:open="addTodoVisible"
-      title="新增待办"
-      :confirm-loading="adding"
-      ok-text="新增"
-      cancel-text="取消"
-      @ok="onSubmitAddTodo"
-    >
-      <a-input
-        v-model:value="newTodoTitle"
-        placeholder="请输入待办内容"
-        allow-clear
-        @press-enter="onSubmitAddTodo"
-      />
-    </a-modal>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
 import { message, Modal, Empty } from 'ant-design-vue'
@@ -190,9 +15,11 @@ import {
   ClockCircleOutlined,
   ExclamationCircleOutlined
 } from '@ant-design/icons-vue'
+import { useRouter } from 'vue-router'
 import { call } from '@renderer/api'
 import dayjs from 'dayjs'
 import type {
+  DashboardCharts,
   DashboardData,
   Lesson,
   ScheduleParseResult,
@@ -200,8 +27,13 @@ import type {
   TodoStatus,
   TodoType
 } from '@shared/types'
+import WeekSchedule from '@renderer/components/WeekSchedule.vue'
+import { subscribeRefresh } from '@renderer/composables/useShortcuts'
+
+const router = useRouter()
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+const weekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
 const stats = ref<DashboardData['stats']>({
   totalStudents: 0,
@@ -211,6 +43,29 @@ const stats = ref<DashboardData['stats']>({
 })
 const todos = ref<Todo[]>([])
 const weekLessons = ref<Lesson[]>([])
+const charts = ref<DashboardCharts | null>(null)
+
+// 图表计算属性
+const maxWeekdayCount = computed(() =>
+  Math.max(1, ...(charts.value?.weekdayLessonCounts ?? [1]))
+)
+const maxClassStudentCount = computed(() =>
+  Math.max(1, ...(charts.value?.classStudentCounts.map((c) => c.count) ?? [1]))
+)
+const feedbackTotal = computed(() =>
+  charts.value ? charts.value.feedbackStats.draft + charts.value.feedbackStats.published : 0
+)
+const publishedPercent = computed(() => {
+  if (!charts.value || feedbackTotal.value === 0) return 0
+  return Math.round((charts.value.feedbackStats.published / feedbackTotal.value) * 100)
+})
+
+function barHeight(value: number, max: number): number {
+  return max === 0 ? 0 : Math.max(4, Math.round((value / max) * 100))
+}
+function barWidth(value: number, max: number): number {
+  return max === 0 ? 0 : Math.max(6, Math.round((value / max) * 100))
+}
 
 const scheduleText = ref('')
 const parseResult = ref<ScheduleParseResult | null>(null)
@@ -269,14 +124,11 @@ function typeColor(t: TodoType): string {
 function formatTime(s: string): string {
   return dayjs(s).format('M月D日 HH:mm')
 }
-function formatLessonTime(s: string): string {
-  const d = dayjs(s)
-  return `${WEEKDAYS[d.day()] ?? ''} ${d.format('M月D日 HH:mm')}`
-}
-function lessonColor(lesson: Lesson): string {
-  if (lesson.feedbackSent) return 'green'
-  if (lesson.status === 'finished') return 'orange'
-  return 'blue'
+
+function onLessonClick(lesson: Lesson): void {
+  // 跳转到授课中心
+  router.push({ name: 'teaching' })
+  message.info(`已跳转授课中心：${lesson.className ?? '课次'}`)
 }
 
 async function loadDashboard(): Promise<void> {
@@ -285,6 +137,7 @@ async function loadDashboard(): Promise<void> {
     stats.value = data.stats
     todos.value = data.todos ?? []
     weekLessons.value = data.weekLessons ?? []
+    charts.value = data.charts ?? null
   } catch (e) {
     message.error(String(e))
   }
@@ -424,8 +277,261 @@ async function onDrop(status: TodoStatus): Promise<void> {
   }
 }
 
-onMounted(loadDashboard)
+onMounted(() => {
+  loadDashboard()
+  subscribeRefresh(loadDashboard)
+})
 </script>
+
+<template>
+  <div class="page-container">
+    <!-- 顶部统计卡片 -->
+    <a-row :gutter="16" class="stat-row">
+      <a-col :span="6">
+        <a-card class="stat-card" :bordered="false">
+          <div class="num">{{ stats.totalStudents }}</div>
+          <div class="label"><TeamOutlined /> 学生数</div>
+        </a-card>
+      </a-col>
+      <a-col :span="6">
+        <a-card class="stat-card" :bordered="false">
+          <div class="num">{{ stats.totalClasses }}</div>
+          <div class="label"><BankOutlined /> 班级数</div>
+        </a-card>
+      </a-col>
+      <a-col :span="6">
+        <a-card class="stat-card" :bordered="false">
+          <div class="num">{{ stats.weekLessonCount }}</div>
+          <div class="label"><CalendarOutlined /> 本周课时</div>
+        </a-card>
+      </a-col>
+      <a-col :span="6">
+        <a-card class="stat-card" :bordered="false">
+          <div class="num">{{ stats.pendingFeedbackCount }}</div>
+          <div class="label"><BellOutlined /> 待反馈数</div>
+        </a-card>
+      </a-col>
+    </a-row>
+
+    <!-- 统计图表 -->
+    <a-row v-if="charts" :gutter="16" class="chart-row">
+      <a-col :span="10">
+        <a-card title="本周每日课时分布" class="section-card chart-card" size="small">
+          <div class="bar-chart">
+            <div
+              v-for="(count, idx) in charts.weekdayLessonCounts"
+              :key="idx"
+              class="bar-col"
+            >
+              <div class="bar-wrap">
+                <div
+                  class="bar"
+                  :style="{ height: barHeight(count, maxWeekdayCount) + '%' }"
+                  :title="`${weekdayLabels[idx]}: ${count} 节`"
+                >
+                  <span v-if="count > 0" class="bar-value">{{ count }}</span>
+                </div>
+              </div>
+              <div class="bar-label">{{ weekdayLabels[idx] }}</div>
+            </div>
+          </div>
+        </a-card>
+      </a-col>
+      <a-col :span="8">
+        <a-card title="班级学生数分布" class="section-card chart-card" size="small">
+          <a-empty
+            v-if="charts.classStudentCounts.length === 0"
+            description="暂无班级"
+            :image="undefined"
+          />
+          <div v-else class="hbar-list">
+            <div
+              v-for="cls in charts.classStudentCounts"
+              :key="cls.name"
+              class="hbar-item"
+            >
+              <div class="hbar-name" :title="cls.name">{{ cls.name }}</div>
+              <div class="hbar-track">
+                <div
+                  class="hbar-fill"
+                  :class="`fill-${cls.type}`"
+                  :style="{ width: barWidth(cls.count, maxClassStudentCount) + '%' }"
+                />
+              </div>
+              <div class="hbar-count">{{ cls.count }}</div>
+            </div>
+          </div>
+        </a-card>
+      </a-col>
+      <a-col :span="6">
+        <a-card title="反馈状态" class="section-card chart-card" size="small">
+          <div class="donut-wrap">
+            <div class="donut">
+              <svg viewBox="0 0 36 36" class="donut-svg">
+                <circle
+                  cx="18" cy="18" r="15.915"
+                  fill="transparent"
+                  stroke="#e5e7eb"
+                  stroke-width="3.5"
+                />
+                <circle
+                  v-if="feedbackTotal > 0"
+                  cx="18" cy="18" r="15.915"
+                  fill="transparent"
+                  stroke="#52c41a"
+                  stroke-width="3.5"
+                  :stroke-dasharray="`${publishedPercent} ${100 - publishedPercent}`"
+                  stroke-dashoffset="25"
+                />
+              </svg>
+              <div class="donut-center">
+                <div class="donut-num">{{ feedbackTotal }}</div>
+                <div class="donut-label">总数</div>
+              </div>
+            </div>
+            <div class="donut-legend">
+              <div class="legend-item">
+                <span class="legend-dot dot-published"></span>
+                已发布 {{ charts.feedbackStats.published }}
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot dot-draft"></span>
+                草稿 {{ charts.feedbackStats.draft }}
+              </div>
+            </div>
+          </div>
+        </a-card>
+      </a-col>
+    </a-row>
+
+    <!-- AI 课表导入 -->
+    <a-card title="AI 课表导入" class="section-card">
+      <a-textarea
+        v-model:value="scheduleText"
+        placeholder="粘贴课表文本（班级、科目、时间、学生名单等），AI 将自动解析结构..."
+        :rows="4"
+        allow-clear
+      />
+      <a-space class="schedule-actions">
+        <a-button type="primary" :loading="parsing" @click="onParseText">
+          <ThunderboltOutlined /> 解析文本
+        </a-button>
+        <a-button :loading="parsing" @click="onParseImage">
+          <PictureOutlined /> 上传截图解析
+        </a-button>
+      </a-space>
+
+      <div v-if="parseResult" class="parse-result">
+        <div class="parse-result-header">
+          <span class="parse-result-title">
+            解析结果（共 {{ parseResult.classes.length }} 个班级）
+          </span>
+          <a-button type="primary" :loading="importing" @click="onConfirmImport">
+            <CheckOutlined /> 确认导入
+          </a-button>
+        </div>
+        <a-table
+          :columns="scheduleColumns"
+          :data-source="parseResult.classes"
+          row-key="name"
+          size="small"
+          :pagination="false"
+          bordered
+        >
+          <template #bodyCell="{ column, record, index }">
+            <template v-if="column.dataIndex === 'idx'">{{ index + 1 }}</template>
+            <template v-else-if="column.dataIndex === 'weekday'">
+              {{ weekdayText(record.weekday) }}
+            </template>
+            <template v-else-if="column.dataIndex === 'time'">
+              {{ record.startTime }} - {{ record.endTime }}
+            </template>
+            <template v-else-if="column.dataIndex === 'studentCount'">
+              {{ record.students.length }}
+            </template>
+          </template>
+        </a-table>
+      </div>
+    </a-card>
+
+    <!-- 智能待办看板 -->
+    <a-card title="智能待办" class="section-card">
+      <template #extra>
+        <a-space>
+          <a-button size="small" :loading="regenerating" @click="onRegenerate">
+            <ReloadOutlined /> 重新生成
+          </a-button>
+          <a-button size="small" type="primary" @click="openAddTodo">
+            <PlusOutlined /> 新增
+          </a-button>
+        </a-space>
+      </template>
+
+      <div class="kanban">
+        <div
+          v-for="col in todoColumns"
+          :key="col.status"
+          class="kanban-col"
+          :class="{ 'drag-over': dragOverCol === col.status }"
+          @dragover.prevent="dragOverCol = col.status"
+          @dragleave="onColDragLeave(col.status)"
+          @drop="onDrop(col.status)"
+        >
+          <div class="kanban-col-header">
+            <span class="kanban-col-title">
+              <span class="dot" :class="`dot-${col.status}`"></span>
+              {{ col.title }}
+            </span>
+            <a-badge :count="col.list.length" :number-style="{ backgroundColor: col.color }" />
+          </div>
+          <div class="kanban-list">
+            <div
+              v-for="todo in col.list"
+              :key="todo.id"
+              class="todo-card"
+              draggable="true"
+              @dragstart="onDragStart($event, todo.id)"
+            >
+              <div class="todo-card-head">
+                <a-tag :color="typeColor(todo.type)" class="todo-tag">
+                  {{ typeText(todo.type) }}
+                </a-tag>
+                <DeleteOutlined class="todo-delete" @click="onRemoveTodo(todo.id)" />
+              </div>
+              <div class="todo-title">{{ todo.title }}</div>
+              <div v-if="todo.dueAt" class="todo-due">
+                <ClockCircleOutlined /> {{ formatTime(todo.dueAt) }}
+              </div>
+            </div>
+            <a-empty v-if="col.list.length === 0" :image="emptyImage" description="暂无待办" />
+          </div>
+        </div>
+      </div>
+    </a-card>
+
+    <!-- 本周课程（周视图） -->
+    <a-card title="本周课程" class="section-card">
+      <WeekSchedule :lessons="weekLessons" @lesson-click="onLessonClick" />
+    </a-card>
+
+    <!-- 新增待办 Modal -->
+    <a-modal
+      v-model:open="addTodoVisible"
+      title="新增待办"
+      :confirm-loading="adding"
+      ok-text="新增"
+      cancel-text="取消"
+      @ok="onSubmitAddTodo"
+    >
+      <a-input
+        v-model:value="newTodoTitle"
+        placeholder="请输入待办内容"
+        allow-clear
+        @press-enter="onSubmitAddTodo"
+      />
+    </a-modal>
+  </div>
+</template>
 
 <style scoped>
 .stat-row {
@@ -452,6 +558,163 @@ onMounted(loadDashboard)
 .section-card {
   margin-bottom: 16px;
   border-radius: 10px;
+}
+.chart-row {
+  margin-bottom: 16px;
+}
+.chart-card {
+  height: 100%;
+}
+/* 柱状图：每日课时 */
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 180px;
+  padding: 8px 0;
+}
+.bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+.bar-wrap {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.bar {
+  width: 70%;
+  min-height: 4px;
+  background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
+  border-radius: 4px 4px 0 0;
+  position: relative;
+  transition: height 0.3s ease;
+  display: flex;
+  justify-content: center;
+}
+.bar-value {
+  position: absolute;
+  top: -20px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4f46e5;
+}
+.bar-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 6px;
+}
+/* 横向条形图：班级学生数 */
+.hbar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 0;
+}
+.hbar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hbar-name {
+  width: 100px;
+  font-size: 12px;
+  color: #374151;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hbar-track {
+  flex: 1;
+  height: 16px;
+  background: #f3f4f6;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.hbar-fill {
+  height: 100%;
+  border-radius: 8px;
+  transition: width 0.3s ease;
+}
+.fill-regular {
+  background: linear-gradient(90deg, #60a5fa, #3b82f6);
+}
+.fill-training {
+  background: linear-gradient(90deg, #fb923c, #f97316);
+}
+.fill-temp {
+  background: linear-gradient(90deg, #c084fc, #a855f7);
+}
+.hbar-count {
+  width: 28px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+/* 环形图：反馈状态 */
+.donut-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 16px;
+}
+.donut {
+  position: relative;
+  width: 120px;
+  height: 120px;
+}
+.donut-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(0deg);
+}
+.donut-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+.donut-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1;
+}
+.donut-label {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+.donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #374151;
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.dot-published {
+  background: #52c41a;
+}
+.dot-draft {
+  background: #e5e7eb;
 }
 .schedule-actions {
   margin-top: 12px;

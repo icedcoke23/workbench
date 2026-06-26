@@ -1,3 +1,97 @@
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import {
+  DashboardOutlined,
+  BulbOutlined,
+  PlayCircleOutlined,
+  FileTextOutlined,
+  SettingOutlined,
+  SyncOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  TeamOutlined,
+  BankOutlined
+} from '@ant-design/icons-vue'
+import { message } from 'ant-design-vue'
+import { call } from '@renderer/api'
+import {
+  useShortcuts,
+  triggerRefresh,
+  triggerNewItem
+} from '@renderer/composables/useShortcuts'
+import type { ViewName } from '@shared/types'
+
+const router = useRouter()
+const route = useRoute()
+const collapsed = ref(false)
+const syncEnabled = ref(false)
+
+const selectedKeys = computed({
+  get: () => [String(route.name ?? 'dashboard')],
+  set: () => {}
+})
+
+const currentTitle = computed(() => (route.meta.title as string) ?? '工作看板')
+const collapseIcon = computed(() => (collapsed.value ? MenuUnfoldOutlined : MenuFoldOutlined))
+
+function onMenuClick({ key }: { key: string }): void {
+  router.push({ name: key })
+}
+
+async function goSync(): Promise<void> {
+  try {
+    const res = await call(window.api.settings.syncNow())
+    message[res.ok ? 'success' : 'warning'](res.message)
+  } catch (e) {
+    message.error(String(e))
+  }
+}
+
+// 注册全局快捷键处理器
+useShortcuts({
+  onNavigate: (view: ViewName) => {
+    router.push({ name: view }).catch(() => {})
+  },
+  onToggleSidebar: () => {
+    collapsed.value = !collapsed.value
+  },
+  onNewItem: () => {
+    triggerNewItem()
+  },
+  onRefresh: () => {
+    triggerRefresh()
+  },
+  onZoomIn: () => {
+    const web = document.querySelector('body')
+    if (web) {
+      const cur = parseFloat(getComputedStyle(web).fontSize) || 16
+      web.style.fontSize = `${Math.min(cur + 1, 22)}px`
+    }
+  },
+  onZoomOut: () => {
+    const web = document.querySelector('body')
+    if (web) {
+      const cur = parseFloat(getComputedStyle(web).fontSize) || 16
+      web.style.fontSize = `${Math.max(cur - 1, 12)}px`
+    }
+  },
+  onZoomReset: () => {
+    const web = document.querySelector('body')
+    if (web) web.style.fontSize = ''
+  }
+})
+
+onMounted(async () => {
+  try {
+    const settings = await call(window.api.settings.get())
+    syncEnabled.value = settings.sync.enabled
+  } catch {
+    // ignore
+  }
+})
+</script>
+
 <template>
   <a-layout class="app-layout">
     <a-layout-sider v-model:collapsed="collapsed" :trigger="null" collapsible width="210" class="app-sider">
@@ -14,6 +108,14 @@
         <a-menu-item key="dashboard">
           <DashboardOutlined />
           <span>工作看板</span>
+        </a-menu-item>
+        <a-menu-item key="students">
+          <TeamOutlined />
+          <span>学生管理</span>
+        </a-menu-item>
+        <a-menu-item key="classes">
+          <BankOutlined />
+          <span>班级管理</span>
         </a-menu-item>
         <a-menu-item key="prep">
           <BulbOutlined />
@@ -55,58 +157,6 @@
     </a-layout>
   </a-layout>
 </template>
-
-<script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import {
-  DashboardOutlined,
-  BulbOutlined,
-  PlayCircleOutlined,
-  FileTextOutlined,
-  SettingOutlined,
-  SyncOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined
-} from '@ant-design/icons-vue'
-import { message } from 'ant-design-vue'
-import { call } from '@renderer/api'
-
-const router = useRouter()
-const route = useRoute()
-const collapsed = ref(false)
-const syncEnabled = ref(false)
-
-const selectedKeys = computed({
-  get: () => [String(route.name ?? 'dashboard')],
-  set: () => {}
-})
-
-const currentTitle = computed(() => (route.meta.title as string) ?? '工作看板')
-const collapseIcon = computed(() => (collapsed.value ? MenuUnfoldOutlined : MenuFoldOutlined))
-
-function onMenuClick({ key }: { key: string }): void {
-  router.push({ name: key })
-}
-
-async function goSync(): Promise<void> {
-  try {
-    const res = await call(window.api.settings.syncNow())
-    message[res.ok ? 'success' : 'warning'](res.message)
-  } catch (e) {
-    message.error(String(e))
-  }
-}
-
-onMounted(async () => {
-  try {
-    const settings = await call(window.api.settings.get())
-    syncEnabled.value = settings.sync.enabled
-  } catch {
-    // ignore
-  }
-})
-</script>
 
 <style scoped>
 .app-layout {

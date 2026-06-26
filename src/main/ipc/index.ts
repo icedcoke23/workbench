@@ -7,6 +7,7 @@ import * as ideaRepo from '../database/repositories/ideas'
 import * as todoRepo from '../database/repositories/todos'
 import * as resourceRepo from '../database/repositories/resources'
 import * as feedbackRepo from '../database/repositories/feedbacks'
+import * as feedbackTemplateRepo from '../database/repositories/feedback-templates'
 import * as docRepo from '../database/repositories/docs'
 import * as settingsRepo from '../database/repositories/settings'
 import * as scheduleService from '../services/schedule'
@@ -16,6 +17,8 @@ import * as todoService from '../services/todos'
 import * as fileService from '../services/file'
 import * as syncService from '../services/sync'
 import * as wechatService from '../services/wechat'
+import * as dataService from '../services/data'
+import * as historyService from '../services/history'
 import { resolveAISettings, invokeAI } from '../services/ai'
 import * as scratchService from '../services/scratch'
 import { app } from 'electron'
@@ -162,6 +165,40 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       if (res.ok) feedbackRepo.markSent(feedbackId, '企业微信')
       return res
     })
+  )
+
+  // ============ 反馈模板 ============
+  ipcMain.handle('feedbackTemplate:list', (_e, q) =>
+    tryRun(() => feedbackTemplateRepo.list(q))
+  )
+  ipcMain.handle('feedbackTemplate:create', (_e, input) =>
+    tryRun(() => feedbackTemplateRepo.create(input))
+  )
+  ipcMain.handle('feedbackTemplate:update', (_e, id, input) =>
+    tryRun(() => feedbackTemplateRepo.update(id, input))
+  )
+  ipcMain.handle('feedbackTemplate:remove', (_e, id) =>
+    tryRun(() => feedbackTemplateRepo.remove(id))
+  )
+
+  // ============ 数据备份/导入/导出 ============
+  ipcMain.handle('data:export', () => tryRun(() => dataService.exportAll()))
+  ipcMain.handle('data:saveExportToFile', async (_e, json) =>
+    tryRunAsync(() => dataService.saveExportToFile(json))
+  )
+  ipcMain.handle('data:pickImportFile', async () =>
+    tryRunAsync(async () => {
+      const p = await dataService.pickImportFile()
+      return p
+    })
+  )
+  ipcMain.handle('data:importFromFile', async (_e, filePath) =>
+    tryRun(() => dataService.importFromFile(filePath))
+  )
+
+  // ============ 学生学习历史 ============
+  ipcMain.handle('studentHistory:get', (_e, studentId) =>
+    tryRun(() => historyService.getStudentHistory(studentId))
   )
 
   // ============ AI 课表导入 ============

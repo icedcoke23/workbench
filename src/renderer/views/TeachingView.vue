@@ -1,221 +1,3 @@
-<template>
-  <div class="page-container">
-    <!-- ============ 课程选择区 ============ -->
-    <template v-if="!teachingLesson">
-      <div class="section-title"><PlayCircleOutlined /> 授课中心</div>
-
-      <a-card :bordered="false" class="select-card">
-        <a-space wrap size="middle">
-          <a-select
-            v-model:value="selectedClassId"
-            placeholder="选择班级"
-            style="width: 240px"
-            :loading="classLoading"
-            @change="loadLessons"
-          >
-            <a-select-option v-for="c in classes" :key="c.id" :value="c.id">
-              {{ c.name }}
-              <a-tag v-if="c.studentCount" style="margin-left: 6px">{{ c.studentCount }}人</a-tag>
-            </a-select-option>
-          </a-select>
-          <a-date-picker
-            v-model:value="selectedDate"
-            placeholder="选择日期"
-            style="width: 180px"
-            @change="loadLessons"
-          />
-        </a-space>
-      </a-card>
-
-      <a-card :bordered="false" style="margin-top: 16px">
-        <a-empty v-if="!selectedClassId" description="请选择班级查看当日课次" />
-        <div v-else-if="lessonLoading" class="loading-wrap"><a-spin /></div>
-        <a-empty v-else-if="lessons.length === 0" description="该日期暂无课次，可切换日期查看" />
-        <a-row v-else :gutter="[16, 16]">
-          <a-col v-for="l in lessons" :key="l.id" :xs="24" :sm="12" :md="8" :lg="6">
-            <a-card
-              hoverable
-              size="small"
-              :class="[
-                'lesson-card',
-                {
-                  'is-finished': l.status === 'finished',
-                  'is-training': l.classType === 'training',
-                  'is-temp': l.classType === 'temp'
-                }
-              ]"
-              @click="startTeaching(l)"
-            >
-              <div class="lesson-time">
-                <ClockCircleOutlined />
-                {{ fmtTime(l.startTime) }} - {{ fmtTime(l.endTime) }}
-                <a-tag v-if="l.classType === 'training'" color="volcano" style="margin-left: 4px">集训</a-tag>
-                <a-tag v-else-if="l.classType === 'temp'" color="purple" style="margin-left: 4px">临时</a-tag>
-              </div>
-              <div class="lesson-subject">{{ l.subject || l.className || '未命名课次' }}</div>
-              <div class="lesson-status">
-                <a-tag :color="statusColor(l.status)">{{ statusText(l.status) }}</a-tag>
-              </div>
-              <div class="lesson-action">
-                <a-space>
-                  <a-button
-                    type="primary"
-                    size="small"
-                    :ghost="l.status === 'teaching'"
-                    @click.stop="startTeaching(l)"
-                  >
-                    {{ l.status === 'teaching' ? '继续上课' : '一键上课' }}
-                  </a-button>
-                  <a-button size="small" @click.stop="openReschedule(l)">
-                    <EditOutlined /> 调整
-                  </a-button>
-                </a-space>
-              </div>
-            </a-card>
-          </a-col>
-        </a-row>
-
-        <!-- 排课调整 Modal -->
-        <a-modal
-          v-model:open="rescheduleVisible"
-          title="调整课次时间"
-          ok-text="保存"
-          cancel-text="取消"
-          @ok="onReschedule"
-        >
-          <a-form layout="vertical">
-            <a-form-item label="开始时间">
-              <a-date-picker
-                v-model:value="rescheduleForm.start"
-                show-time
-                format="YYYY-MM-DD HH:mm"
-                style="width: 100%"
-              />
-            </a-form-item>
-            <a-form-item label="结束时间">
-              <a-date-picker
-                v-model:value="rescheduleForm.end"
-                show-time
-                format="YYYY-MM-DD HH:mm"
-                style="width: 100%"
-              />
-            </a-form-item>
-          </a-form>
-        </a-modal>
-      </a-card>
-    </template>
-
-    <!-- ============ 授课模式 ============ -->
-    <template v-else>
-      <a-card :bordered="false" class="teaching-header">
-        <div class="header-row">
-          <div class="header-info">
-            <a-tag color="blue">{{ currentClassName }}</a-tag>
-            <span class="lesson-title">
-              {{ fmtTime(teachingLesson.startTime) }} - {{ fmtTime(teachingLesson.endTime) }}
-              <span v-if="teachingLesson.subject"> · {{ teachingLesson.subject }}</span>
-            </span>
-          </div>
-          <a-space>
-            <a-button type="primary" size="large" :loading="picking" @click="randomPick">
-              <template #icon><ThunderboltOutlined /></template>
-              随机点名
-            </a-button>
-            <a-button danger size="large" @click="confirmFinish">
-              <template #icon><PoweroffOutlined /></template>
-              结束上课
-            </a-button>
-          </a-space>
-        </div>
-      </a-card>
-
-      <!-- 随机点名结果横幅 -->
-      <transition name="banner">
-        <div v-if="pickResult" class="pick-banner">
-          <a-avatar :size="72" :src="pickResult.avatarPath || undefined">
-            {{ pickResult.avatarPath ? '' : pickResult.name.charAt(0) }}
-          </a-avatar>
-          <div class="pick-text">
-            <div class="pick-name">{{ pickResult.name }}</div>
-            <div class="pick-tip">被点到啦！</div>
-          </div>
-          <a-button class="pick-close" size="small" type="text" @click="pickResult = null">
-            <CloseOutlined />
-          </a-button>
-        </div>
-      </transition>
-
-      <a-row :gutter="16" style="margin-top: 16px">
-        <!-- 积分头像网格 -->
-        <a-col :xs="24" :lg="17">
-          <a-card :bordered="false" class="grid-card">
-            <template #title>积分头像网格</template>
-            <template #extra>
-              <span class="grid-count">共 {{ students.length }} 名学生</span>
-            </template>
-            <a-spin :spinning="studentLoading">
-              <a-empty
-                v-if="!studentLoading && students.length === 0"
-                description="该班级暂无学生"
-              />
-              <div v-else class="avatar-grid">
-                <a-popover
-                  v-for="s in students"
-                  :key="s.id"
-                  trigger="click"
-                  placement="top"
-                  :open="openId === s.id"
-                  @open-change="(v) => onPopoverChange(s, v)"
-                >
-                  <template #content>
-                    <div class="score-panel" @click.stop>
-                      <div class="score-student">
-                        {{ s.name }}
-                        <span class="score-current">当前 {{ totals[s.id] || 0 }} 分</span>
-                      </div>
-                      <div class="score-btns">
-                        <a-button type="primary" size="small" @click="doScore(s, 1)">+1</a-button>
-                        <a-button type="primary" size="small" @click="doScore(s, 2)">+2</a-button>
-                        <a-button size="small" danger @click="doScore(s, -1)">-1</a-button>
-                        <a-button size="small" danger @click="doScore(s, -2)">-2</a-button>
-                      </div>
-                      <a-input
-                        v-model:value="currentNote"
-                        placeholder="点评内容（可选）"
-                        size="small"
-                        style="margin-top: 8px; width: 220px"
-                        @press-enter="doScore(s, 1)"
-                      />
-                    </div>
-                  </template>
-                  <div class="avatar-cell" :class="{ picked: pickedId === s.id }">
-                    <a-avatar :size="56" :src="s.avatarPath || undefined">
-                      {{ s.avatarPath ? '' : s.name.charAt(0) }}
-                    </a-avatar>
-                    <div class="cell-name">{{ s.name }}</div>
-                    <div class="cell-score">{{ totals[s.id] || 0 }} 分</div>
-                    <div v-if="s.tags && s.tags.length" class="cell-tags">
-                      <a-tag v-for="t in s.tags" :key="t">{{ t }}</a-tag>
-                    </div>
-                  </div>
-                </a-popover>
-              </div>
-            </a-spin>
-          </a-card>
-        </a-col>
-
-        <!-- 可视化计时器 -->
-        <a-col :xs="24" :lg="7">
-          <a-card :bordered="false" class="timer-card">
-            <template #title>可视化计时器</template>
-            <CountDownTimer />
-          </a-card>
-        </a-col>
-      </a-row>
-    </template>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, defineComponent, h, watch } from 'vue'
 import { message, Modal, Button as AButton, InputNumber as AInputNumber } from 'ant-design-vue'
@@ -625,6 +407,224 @@ onMounted(async () => {
   }
 })
 </script>
+
+<template>
+  <div class="page-container">
+    <!-- ============ 课程选择区 ============ -->
+    <template v-if="!teachingLesson">
+      <div class="section-title"><PlayCircleOutlined /> 授课中心</div>
+
+      <a-card :bordered="false" class="select-card">
+        <a-space wrap size="middle">
+          <a-select
+            v-model:value="selectedClassId"
+            placeholder="选择班级"
+            style="width: 240px"
+            :loading="classLoading"
+            @change="loadLessons"
+          >
+            <a-select-option v-for="c in classes" :key="c.id" :value="c.id">
+              {{ c.name }}
+              <a-tag v-if="c.studentCount" style="margin-left: 6px">{{ c.studentCount }}人</a-tag>
+            </a-select-option>
+          </a-select>
+          <a-date-picker
+            v-model:value="selectedDate"
+            placeholder="选择日期"
+            style="width: 180px"
+            @change="loadLessons"
+          />
+        </a-space>
+      </a-card>
+
+      <a-card :bordered="false" style="margin-top: 16px">
+        <a-empty v-if="!selectedClassId" description="请选择班级查看当日课次" />
+        <div v-else-if="lessonLoading" class="loading-wrap"><a-spin /></div>
+        <a-empty v-else-if="lessons.length === 0" description="该日期暂无课次，可切换日期查看" />
+        <a-row v-else :gutter="[16, 16]">
+          <a-col v-for="l in lessons" :key="l.id" :xs="24" :sm="12" :md="8" :lg="6">
+            <a-card
+              hoverable
+              size="small"
+              :class="[
+                'lesson-card',
+                {
+                  'is-finished': l.status === 'finished',
+                  'is-training': l.classType === 'training',
+                  'is-temp': l.classType === 'temp'
+                }
+              ]"
+              @click="startTeaching(l)"
+            >
+              <div class="lesson-time">
+                <ClockCircleOutlined />
+                {{ fmtTime(l.startTime) }} - {{ fmtTime(l.endTime) }}
+                <a-tag v-if="l.classType === 'training'" color="volcano" style="margin-left: 4px">集训</a-tag>
+                <a-tag v-else-if="l.classType === 'temp'" color="purple" style="margin-left: 4px">临时</a-tag>
+              </div>
+              <div class="lesson-subject">{{ l.subject || l.className || '未命名课次' }}</div>
+              <div class="lesson-status">
+                <a-tag :color="statusColor(l.status)">{{ statusText(l.status) }}</a-tag>
+              </div>
+              <div class="lesson-action">
+                <a-space>
+                  <a-button
+                    type="primary"
+                    size="small"
+                    :ghost="l.status === 'teaching'"
+                    @click.stop="startTeaching(l)"
+                  >
+                    {{ l.status === 'teaching' ? '继续上课' : '一键上课' }}
+                  </a-button>
+                  <a-button size="small" @click.stop="openReschedule(l)">
+                    <EditOutlined /> 调整
+                  </a-button>
+                </a-space>
+              </div>
+            </a-card>
+          </a-col>
+        </a-row>
+
+        <!-- 排课调整 Modal -->
+        <a-modal
+          v-model:open="rescheduleVisible"
+          title="调整课次时间"
+          ok-text="保存"
+          cancel-text="取消"
+          @ok="onReschedule"
+        >
+          <a-form layout="vertical">
+            <a-form-item label="开始时间">
+              <a-date-picker
+                v-model:value="rescheduleForm.start"
+                show-time
+                format="YYYY-MM-DD HH:mm"
+                style="width: 100%"
+              />
+            </a-form-item>
+            <a-form-item label="结束时间">
+              <a-date-picker
+                v-model:value="rescheduleForm.end"
+                show-time
+                format="YYYY-MM-DD HH:mm"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </a-form>
+        </a-modal>
+      </a-card>
+    </template>
+
+    <!-- ============ 授课模式 ============ -->
+    <template v-else>
+      <a-card :bordered="false" class="teaching-header">
+        <div class="header-row">
+          <div class="header-info">
+            <a-tag color="blue">{{ currentClassName }}</a-tag>
+            <span class="lesson-title">
+              {{ fmtTime(teachingLesson.startTime) }} - {{ fmtTime(teachingLesson.endTime) }}
+              <span v-if="teachingLesson.subject"> · {{ teachingLesson.subject }}</span>
+            </span>
+          </div>
+          <a-space>
+            <a-button type="primary" size="large" :loading="picking" @click="randomPick">
+              <template #icon><ThunderboltOutlined /></template>
+              随机点名
+            </a-button>
+            <a-button danger size="large" @click="confirmFinish">
+              <template #icon><PoweroffOutlined /></template>
+              结束上课
+            </a-button>
+          </a-space>
+        </div>
+      </a-card>
+
+      <!-- 随机点名结果横幅 -->
+      <transition name="banner">
+        <div v-if="pickResult" class="pick-banner">
+          <a-avatar :size="72" :src="pickResult.avatarPath || undefined">
+            {{ pickResult.avatarPath ? '' : pickResult.name.charAt(0) }}
+          </a-avatar>
+          <div class="pick-text">
+            <div class="pick-name">{{ pickResult.name }}</div>
+            <div class="pick-tip">被点到啦！</div>
+          </div>
+          <a-button class="pick-close" size="small" type="text" @click="pickResult = null">
+            <CloseOutlined />
+          </a-button>
+        </div>
+      </transition>
+
+      <a-row :gutter="16" style="margin-top: 16px">
+        <!-- 积分头像网格 -->
+        <a-col :xs="24" :lg="17">
+          <a-card :bordered="false" class="grid-card">
+            <template #title>积分头像网格</template>
+            <template #extra>
+              <span class="grid-count">共 {{ students.length }} 名学生</span>
+            </template>
+            <a-spin :spinning="studentLoading">
+              <a-empty
+                v-if="!studentLoading && students.length === 0"
+                description="该班级暂无学生"
+              />
+              <div v-else class="avatar-grid">
+                <a-popover
+                  v-for="s in students"
+                  :key="s.id"
+                  trigger="click"
+                  placement="top"
+                  :open="openId === s.id"
+                  @open-change="(v) => onPopoverChange(s, v)"
+                >
+                  <template #content>
+                    <div class="score-panel" @click.stop>
+                      <div class="score-student">
+                        {{ s.name }}
+                        <span class="score-current">当前 {{ totals[s.id] || 0 }} 分</span>
+                      </div>
+                      <div class="score-btns">
+                        <a-button type="primary" size="small" @click="doScore(s, 1)">+1</a-button>
+                        <a-button type="primary" size="small" @click="doScore(s, 2)">+2</a-button>
+                        <a-button size="small" danger @click="doScore(s, -1)">-1</a-button>
+                        <a-button size="small" danger @click="doScore(s, -2)">-2</a-button>
+                      </div>
+                      <a-input
+                        v-model:value="currentNote"
+                        placeholder="点评内容（可选）"
+                        size="small"
+                        style="margin-top: 8px; width: 220px"
+                        @press-enter="doScore(s, 1)"
+                      />
+                    </div>
+                  </template>
+                  <div class="avatar-cell" :class="{ picked: pickedId === s.id }">
+                    <a-avatar :size="56" :src="s.avatarPath || undefined">
+                      {{ s.avatarPath ? '' : s.name.charAt(0) }}
+                    </a-avatar>
+                    <div class="cell-name">{{ s.name }}</div>
+                    <div class="cell-score">{{ totals[s.id] || 0 }} 分</div>
+                    <div v-if="s.tags && s.tags.length" class="cell-tags">
+                      <a-tag v-for="t in s.tags" :key="t">{{ t }}</a-tag>
+                    </div>
+                  </div>
+                </a-popover>
+              </div>
+            </a-spin>
+          </a-card>
+        </a-col>
+
+        <!-- 可视化计时器 -->
+        <a-col :xs="24" :lg="7">
+          <a-card :bordered="false" class="timer-card">
+            <template #title>可视化计时器</template>
+            <CountDownTimer />
+          </a-card>
+        </a-col>
+      </a-row>
+    </template>
+  </div>
+</template>
 
 <style scoped>
 .select-card {

@@ -3,6 +3,7 @@ import * as studentRepo from './repositories/students'
 import * as classRepo from './repositories/classes'
 import * as ideaRepo from './repositories/ideas'
 import * as lessonRepo from './repositories/lessons'
+import { seedBuiltinTemplates } from './repositories/feedback-templates'
 
 /**
  * 首次启动时插入演示数据（仅在数据库完全为空时执行）
@@ -10,6 +11,13 @@ import * as lessonRepo from './repositories/lessons'
  */
 export function seedIfEmpty(): void {
   const conn = db()
+  // 内置反馈模板始终尝试初始化（内部会判空）
+  try {
+    seedBuiltinTemplates()
+  } catch (e) {
+    console.error('内置模板初始化失败', e)
+  }
+
   const count = conn.prepare('SELECT COUNT(*) as n FROM students').get() as { n: number }
   if (count.n > 0) return
 

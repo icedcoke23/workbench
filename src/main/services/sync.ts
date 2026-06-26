@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { type BrowserWindow } from 'electron'
 import { getSync, setSync } from '../database/repositories/settings'
 import { db, stringifyJSON } from '../database/db'
 import * as studentRepo from '../database/repositories/students'
