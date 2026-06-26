@@ -8,6 +8,7 @@ release/
 .env.local
 *.local
 .vite/
+.pnpm-store/
 scratch-gui/
 _ref/
 data/
