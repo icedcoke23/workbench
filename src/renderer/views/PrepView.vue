@@ -116,6 +116,17 @@
             <a-select-option value="sprite">角色</a-select-option>
             <a-select-option value="sound">音效</a-select-option>
           </a-select>
+          <a-select
+            v-model:value="resourceFilter.tag"
+            style="width: 160px"
+            placeholder="全部标签"
+            allow-clear
+            @change="loadResources"
+          >
+            <a-select-option v-for="t in resourceTags" :key="t" :value="t">
+              {{ t }}
+            </a-select-option>
+          </a-select>
           <a-input-search
             v-model:value="resourceFilter.keyword"
             placeholder="按名称搜索素材"
@@ -493,9 +504,11 @@ async function submitNewVersion(): Promise<void> {
 // ============ 资源库 ============
 const resources = ref<Resource[]>([])
 const resourcesLoading = ref(false)
-const resourceFilter = reactive<{ type: string; keyword: string }>({
+const resourceTags = ref<string[]>([])
+const resourceFilter = reactive<{ type: string; keyword: string; tag: string }>({
   type: '',
-  keyword: ''
+  keyword: '',
+  tag: ''
 })
 
 const resourceColumns = [
@@ -509,12 +522,18 @@ const resourceColumns = [
 async function loadResources(): Promise<void> {
   resourcesLoading.value = true
   try {
-    resources.value = await call(
-      window.api.resource.list({
-        type: resourceFilter.type || undefined,
-        keyword: resourceFilter.keyword.trim() || undefined
-      })
-    )
+    const [list, tags] = await Promise.all([
+      call(
+        window.api.resource.list({
+          type: resourceFilter.type || undefined,
+          keyword: resourceFilter.keyword.trim() || undefined,
+          tag: resourceFilter.tag || undefined
+        })
+      ),
+      call(window.api.resource.allTags())
+    ])
+    resources.value = list
+    resourceTags.value = tags
   } catch (e) {
     message.error(`加载素材失败：${String(e instanceof Error ? e.message : e)}`)
   } finally {

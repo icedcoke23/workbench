@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
 import type { Database as DB } from 'better-sqlite3'
 import schemaSql from './schema.sql?raw'
+import { seedIfEmpty } from './seed'
 
 export type { DB }
 
@@ -27,6 +28,14 @@ export function initDatabase(dbPath: string): DB {
   ).run(randomUUID())
 
   dbInstance = db
+
+  // 首次启动时插入演示数据
+  try {
+    seedIfEmpty()
+  } catch (e) {
+    console.error('Seed 数据初始化失败', e)
+  }
+
   return db
 }
 

@@ -264,8 +264,7 @@ async function generate(): Promise<void> {
   previewText.value = ''
   currentFeedback.value = null
   try {
-    // generate 实际返回保存后的 Feedback 对象（类型声明为 string，这里断言）
-    const fb = (await call(window.api.feedback.generate(lessonId.value))) as unknown as Feedback
+    const fb = await call(window.api.feedback.generate(lessonId.value))
     currentFeedback.value = fb
     previewText.value = fb.content || ''
     await loadFeedbacks(fb.classId)
@@ -321,10 +320,7 @@ async function sendWeChat(): Promise<void> {
   if (!currentFeedback.value) return
   sending.value = true
   try {
-    // sendWeChat 实际返回 { ok, message }（类型声明为 void，这里断言）
-    const res = (await call(
-      window.api.feedback.sendWeChat(currentFeedback.value.id)
-    )) as unknown as { ok: boolean; message: string }
+    const res = await call(window.api.feedback.sendWeChat(currentFeedback.value.id))
     if (res.ok) message.success(res.message || '已发送到企业微信')
     else message.warning(res.message || '发送失败')
     await loadFeedbacks(currentFeedback.value.classId)

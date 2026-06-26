@@ -91,7 +91,7 @@ export function registerScratchIpc(): void {
   })
 
   // 渲染进程请求打开资源选择器（侧边栏入口）
-  ipcMain.handle('scratch:pick-resource-file', async () => {
+  ipcMain.handle('scratch:pickResourceFile', async () => {
     const res = await dialog.showOpenDialog({
       title: '选择素材文件',
       filters: [

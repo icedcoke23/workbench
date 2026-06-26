@@ -31,6 +31,7 @@ export async function sendToWeChat(params: {
   }
 
   const delay = settings.sendDelayMs ?? 800
+  const searchHotkey = settings.searchHotkey || 'CommandOrControl+F'
 
   // 设置剪贴板内容
   if (params.pdfPath && existsSync(params.pdfPath)) {
@@ -41,7 +42,7 @@ export async function sendToWeChat(params: {
     return { ok: false, message: '无可发送内容' }
   }
 
-  const psScript = buildPsScript(groupName, delay)
+  const psScript = buildPsScript(groupName, delay, searchHotkey)
   try {
     const { stdout } = await execFileAsync(
       'powershell.exe',
@@ -67,9 +68,10 @@ async function setClipboardFile(filePath: string): Promise<void> {
   }
 }
 
-function buildPsScript(groupName: string, delay: number): string {
+function buildPsScript(groupName: string, delay: number, searchHotkey: string): string {
   const titles = WECOM_TITLES.map((t) => `'${t}'`).join(',')
   const wait = (ms: number) => `Start-Sleep -Milliseconds ${ms}`
+  const searchKeys = acceleratorToSendKeys(searchHotkey)
   return `
 $ErrorActionPreference = 'Stop'
 Add-Type @"
@@ -93,8 +95,8 @@ ${wait(200)}
 [void][Win32]::SetForegroundWindow($found)
 ${wait(delay)}
 $wsh = New-Object -ComObject WScript.Shell
-# 打开搜索（Ctrl+F）
-$wsh.SendKeys('^f')
+# 打开搜索（${escapePs(searchHotkey)}）
+$wsh.SendKeys('${searchKeys}')
 ${wait(delay)}
 # 输入群名
 $wsh.SendKeys('${escapePs(groupName)}')
@@ -110,6 +112,29 @@ $wsh.SendKeys('{ENTER}')
 ${wait(300)}
 Write-Output 'OK'
 `.trim()
+}
+
+/**
+ * 将 Electron accelerator（如 CommandOrControl+F）转换为 WScript.Shell SendKeys 格式（如 ^f）
+ * CommandOrControl/Ctrl → ^，Alt → %，Shift → +，字母键转小写
+ */
+function acceleratorToSendKeys(accelerator: string): string {
+  const parts = accelerator.split('+')
+  let prefix = ''
+  let key = ''
+  for (const p of parts) {
+    const lower = p.trim().toLowerCase()
+    if (lower === 'commandorcontrol' || lower === 'ctrl' || lower === 'control' || lower === 'cmd' || lower === 'command') {
+      prefix += '^'
+    } else if (lower === 'alt') {
+      prefix += '%'
+    } else if (lower === 'shift') {
+      prefix += '+'
+    } else {
+      key = lower
+    }
+  }
+  return prefix + (key || 'f')
 }
 
 function escapePs(s: string): string {

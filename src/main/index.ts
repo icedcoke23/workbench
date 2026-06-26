@@ -6,9 +6,10 @@ import { registerIpc } from './ipc'
 import { registerScratchIpc, setMainWindow } from './services/scratch'
 import { regenerateAutoTodos } from './services/todos'
 import { getSync } from './database/repositories/settings'
-import { syncNow } from './services/sync'
+import { syncNow, setSyncWindow } from './services/sync'
 
 let mainWindow: BrowserWindow | null = null
+let syncTimer: NodeJS.Timeout | null = null
 
 function createWindow(): BrowserWindow {
   mainWindow = new BrowserWindow({
@@ -61,6 +62,7 @@ app.whenReady().then(() => {
 
   const win = createWindow()
   setMainWindow(win)
+  setSyncWindow(win)
   optimizer.watchWindowShortcuts(win)
 
   // 启动时自动生成待办
@@ -70,10 +72,13 @@ app.whenReady().then(() => {
     console.error('生成待办失败', e)
   }
 
-  // 启动时若开启自动同步，后台执行一次
+  // 启动时若开启自动同步，后台执行一次 + 定时同步（每 10 分钟）
   const sync = getSync()
   if (sync.enabled && sync.autoSync) {
     syncNow().catch((e) => console.error('启动同步失败', e))
+    syncTimer = setInterval(() => {
+      syncNow().catch((e) => console.error('定时同步失败', e))
+    }, 10 * 60 * 1000)
   }
 
   app.on('activate', () => {
@@ -83,11 +88,16 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   setMainWindow(null)
+  setSyncWindow(null)
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
 app.on('before-quit', () => {
+  if (syncTimer) {
+    clearInterval(syncTimer)
+    syncTimer = null
+  }
   closeDatabase()
 })

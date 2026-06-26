@@ -109,6 +109,7 @@ export interface Lesson {
   id: ID
   classId: ID
   className?: string
+  classType?: ClassType
   startTime: string
   endTime: string
   ideaVersionId?: string | null

@@ -60,7 +60,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   )
 
   // ============ 点子库 ============
-  ipcMain.handle('idea:list', () => tryRun(() => ideaRepo.list()))
+  ipcMain.handle('idea:list', (_e, q) => tryRun(() => ideaRepo.list(q)))
   ipcMain.handle('idea:get', (_e, id) => tryRun(() => ideaRepo.get(id)))
   ipcMain.handle('idea:create', (_e, input) => tryRun(() => ideaRepo.create(input)))
   ipcMain.handle('idea:update', (_e, id, input) => tryRun(() => ideaRepo.update(id, input)))
@@ -78,7 +78,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // ============ 资源库 ============
   ipcMain.handle('resource:list', (_e, q) => tryRun(() => resourceRepo.list(q)))
   ipcMain.handle('resource:create', (_e, input) => tryRun(() => resourceRepo.create(input)))
+  ipcMain.handle('resource:update', (_e, id, input) => tryRun(() => resourceRepo.update(id, input)))
   ipcMain.handle('resource:remove', (_e, id) => tryRun(() => resourceRepo.remove(id)))
+  ipcMain.handle('resource:allTags', () => tryRun(() => resourceRepo.allTags()))
   ipcMain.handle('resource:importFile', async (_e, filePath, type) =>
     tryRunAsync(async () => {
       const { name, filePath: dest } = await fileService.importResourceFile(filePath, type)

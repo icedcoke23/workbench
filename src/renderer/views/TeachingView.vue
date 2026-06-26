@@ -36,31 +36,72 @@
             <a-card
               hoverable
               size="small"
-              :class="['lesson-card', { 'is-finished': l.status === 'finished' }]"
+              :class="[
+                'lesson-card',
+                {
+                  'is-finished': l.status === 'finished',
+                  'is-training': l.classType === 'training',
+                  'is-temp': l.classType === 'temp'
+                }
+              ]"
               @click="startTeaching(l)"
             >
               <div class="lesson-time">
                 <ClockCircleOutlined />
                 {{ fmtTime(l.startTime) }} - {{ fmtTime(l.endTime) }}
+                <a-tag v-if="l.classType === 'training'" color="volcano" style="margin-left: 4px">集训</a-tag>
+                <a-tag v-else-if="l.classType === 'temp'" color="purple" style="margin-left: 4px">临时</a-tag>
               </div>
               <div class="lesson-subject">{{ l.subject || l.className || '未命名课次' }}</div>
               <div class="lesson-status">
                 <a-tag :color="statusColor(l.status)">{{ statusText(l.status) }}</a-tag>
               </div>
-              <div v-if="l.status !== 'finished'" class="lesson-action">
-                <a-button
-                  type="primary"
-                  size="small"
-                  block
-                  :ghost="l.status === 'teaching'"
-                  @click.stop="startTeaching(l)"
-                >
-                  {{ l.status === 'teaching' ? '继续上课' : '一键上课' }}
-                </a-button>
+              <div class="lesson-action">
+                <a-space>
+                  <a-button
+                    type="primary"
+                    size="small"
+                    :ghost="l.status === 'teaching'"
+                    @click.stop="startTeaching(l)"
+                  >
+                    {{ l.status === 'teaching' ? '继续上课' : '一键上课' }}
+                  </a-button>
+                  <a-button size="small" @click.stop="openReschedule(l)">
+                    <EditOutlined /> 调整
+                  </a-button>
+                </a-space>
               </div>
             </a-card>
           </a-col>
         </a-row>
+
+        <!-- 排课调整 Modal -->
+        <a-modal
+          v-model:open="rescheduleVisible"
+          title="调整课次时间"
+          ok-text="保存"
+          cancel-text="取消"
+          @ok="onReschedule"
+        >
+          <a-form layout="vertical">
+            <a-form-item label="开始时间">
+              <a-date-picker
+                v-model:value="rescheduleForm.start"
+                show-time
+                format="YYYY-MM-DD HH:mm"
+                style="width: 100%"
+              />
+            </a-form-item>
+            <a-form-item label="结束时间">
+              <a-date-picker
+                v-model:value="rescheduleForm.end"
+                show-time
+                format="YYYY-MM-DD HH:mm"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </a-form>
+        </a-modal>
       </a-card>
     </template>
 
@@ -176,14 +217,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, defineComponent, h, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, defineComponent, h, watch } from 'vue'
 import { message, Modal, Button as AButton, InputNumber as AInputNumber } from 'ant-design-vue'
 import {
   PlayCircleOutlined,
   PoweroffOutlined,
   CloseOutlined,
   ThunderboltOutlined,
-  ClockCircleOutlined
+  ClockCircleOutlined,
+  EditOutlined
 } from '@ant-design/icons-vue'
 import { call } from '@renderer/api'
 import type { ClassInfo, Lesson, Student } from '@shared/types'
@@ -372,6 +414,49 @@ const pickedId = ref<string | null>(null)
 const pickResult = ref<Student | null>(null)
 const currentNote = ref('')
 
+// ============ 排课调整 ============
+const rescheduleVisible = ref(false)
+const rescheduleForm = reactive<{
+  lessonId: string
+  start: dayjs.Dayjs | null
+  end: dayjs.Dayjs | null
+}>({
+  lessonId: '',
+  start: null,
+  end: null
+})
+
+function openReschedule(l: Lesson): void {
+  rescheduleForm.lessonId = l.id
+  rescheduleForm.start = dayjs(l.startTime)
+  rescheduleForm.end = dayjs(l.endTime)
+  rescheduleVisible.value = true
+}
+
+async function onReschedule(): Promise<void> {
+  if (!rescheduleForm.start || !rescheduleForm.end) {
+    message.warning('请选择开始和结束时间')
+    return
+  }
+  if (!rescheduleForm.end.isAfter(rescheduleForm.start)) {
+    message.warning('结束时间必须晚于开始时间')
+    return
+  }
+  try {
+    await call(
+      window.api.lesson.update(rescheduleForm.lessonId, {
+        startTime: rescheduleForm.start.toISOString(),
+        endTime: rescheduleForm.end.toISOString()
+      })
+    )
+    message.success('课次时间已调整')
+    rescheduleVisible.value = false
+    await loadLessons()
+  } catch (e) {
+    message.error(`调整失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
 const currentClassName = computed(
   () =>
     classes.value.find((c) => c.id === selectedClassId.value)?.name ||
@@ -451,6 +536,15 @@ async function startTeaching(l: Lesson): Promise<void> {
   totals.value = {}
   await loadStudents()
   await loadRecords()
+  // 若开启 autoLaunch 且课程关联了课件版本，自动打开 Scratch 编辑器
+  try {
+    const settings = await call(window.api.settings.get())
+    if (settings.scratch.autoLaunch && l.ideaVersionId) {
+      await call(window.api.scratch.launch(l.ideaVersionId))
+    }
+  } catch {
+    // 自动启动失败不阻塞授课流程
+  }
 }
 
 function onPopoverChange(s: Student, v: boolean): void {
@@ -546,6 +640,14 @@ onMounted(async () => {
 }
 .lesson-card.is-finished {
   opacity: 0.6;
+}
+.lesson-card.is-training {
+  border: 2px solid #fa541c;
+  background: linear-gradient(135deg, #fff2e8 0%, #ffffff 60%);
+}
+.lesson-card.is-temp {
+  border: 2px dashed #722ed1;
+  background: linear-gradient(135deg, #f9f0ff 0%, #ffffff 60%);
 }
 .lesson-time {
   font-size: 13px;

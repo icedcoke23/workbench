@@ -82,10 +82,12 @@ export interface WorkbenchAPI {
   }
   // 资源库
   resource: {
-    list: (q?: { type?: string; classId?: ID; keyword?: string }) => Promise<Result<Resource[]>>
+    list: (q?: { type?: string; classId?: ID; keyword?: string; tag?: string }) => Promise<Result<Resource[]>>
     create: (input: ResourceInput) => Promise<Result<Resource>>
+    update: (id: ID, input: Partial<ResourceInput>) => Promise<Result<Resource>>
     remove: (id: ID) => Promise<Result<void>>
     importFile: (filePath: string, type: Resource['type']) => Promise<Result<Resource>>
+    allTags: () => Promise<Result<string[]>>
   }
   // 反馈/报告
   feedback: {
