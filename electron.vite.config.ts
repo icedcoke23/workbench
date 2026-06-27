@@ -7,6 +7,7 @@ import { AntDesignVueResolver } from 'unplugin-vue-components/resolvers'
 import { copyFileSync, mkdirSync, existsSync } from 'fs'
 
 // 拷贝 better-sqlite3 的原生 .node 文件到 out 目录（打包需要）
+// 交叉打包时优先使用 build/Release 下的预编译二进制（已替换为目标平台版本）
 function copyNativeAssets() {
   return {
     name: 'copy-native-assets',
@@ -22,7 +23,7 @@ function copyNativeAssets() {
             copyFileSync(c, resolve(outDir, 'better_sqlite3.node'))
           }
         }
-      } catch (e) {
+      } catch {
         // 忽略拷贝错误
       }
     }

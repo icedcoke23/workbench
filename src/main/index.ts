@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, Menu } from 'electron'
+import { app, BrowserWindow, shell, Menu, dialog } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { join } from 'path'
 import { initDatabase, closeDatabase } from './database/db'
@@ -80,8 +80,18 @@ app.whenReady().then(() => {
 
   // 初始化数据库
   const dbPath = join(app.getPath('userData'), 'workbench.db')
-  initDatabase(dbPath)
-  log.info('db', '数据库已初始化', { path: dbPath })
+  let dbReady = true
+  try {
+    initDatabase(dbPath)
+    log.info('db', '数据库已初始化', { path: dbPath })
+  } catch (e) {
+    dbReady = false
+    log.error('db', '数据库初始化失败', { error: e })
+    dialog.showErrorBox(
+      '数据库初始化失败',
+      `应用无法初始化数据库，可能原生模块加载失败。\n\n错误信息：${e instanceof Error ? e.message : String(e)}\n\n应用将继续启动，但部分功能可能不可用。`
+    )
+  }
 
   // 应用基础设置
   electronApp.setAppUserModelId('com.icedcoke23.workbench')
@@ -96,16 +106,18 @@ app.whenReady().then(() => {
   optimizer.watchWindowShortcuts(win)
 
   // 启动时自动生成待办
-  try {
-    regenerateAutoTodos()
-  } catch (e) {
-    log.error('app', '生成待办失败', { error: e })
-  }
+  if (dbReady) {
+    try {
+      regenerateAutoTodos()
+    } catch (e) {
+      log.error('app', '生成待办失败', { error: e })
+    }
 
-  // 启动时若开启自动同步，后台执行一次
-  const sync = getSync()
-  if (sync.enabled && sync.autoSync) {
-    syncNow().catch((e) => log.error('sync', '启动同步失败', { error: e }))
+    // 启动时若开启自动同步，后台执行一次
+    const sync = getSync()
+    if (sync.enabled && sync.autoSync) {
+      syncNow().catch((e) => log.error('sync', '启动同步失败', { error: e }))
+    }
   }
 
   app.on('activate', () => {
