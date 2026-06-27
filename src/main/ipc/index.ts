@@ -7,6 +7,7 @@ import * as ideaRepo from '../database/repositories/ideas'
 import * as todoRepo from '../database/repositories/todos'
 import * as resourceRepo from '../database/repositories/resources'
 import * as feedbackRepo from '../database/repositories/feedbacks'
+import * as feedbackTemplateRepo from '../database/repositories/feedback-templates'
 import * as docRepo from '../database/repositories/docs'
 import * as settingsRepo from '../database/repositories/settings'
 import * as scheduleService from '../services/schedule'
@@ -16,6 +17,8 @@ import * as todoService from '../services/todos'
 import * as fileService from '../services/file'
 import * as syncService from '../services/sync'
 import * as wechatService from '../services/wechat'
+import * as dataService from '../services/data'
+import * as historyService from '../services/history'
 import { resolveAISettings, invokeAI } from '../services/ai'
 import * as scratchService from '../services/scratch'
 import { app } from 'electron'
@@ -78,7 +81,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // ============ 资源库 ============
   ipcMain.handle('resource:list', (_e, q) => tryRun(() => resourceRepo.list(q)))
   ipcMain.handle('resource:create', (_e, input) => tryRun(() => resourceRepo.create(input)))
+  ipcMain.handle('resource:update', (_e, id, input) => tryRun(() => resourceRepo.update(id, input)))
   ipcMain.handle('resource:remove', (_e, id) => tryRun(() => resourceRepo.remove(id)))
+  ipcMain.handle('resource:allTags', () => tryRun(() => resourceRepo.allTags()))
   ipcMain.handle('resource:importFile', async (_e, filePath, type) =>
     tryRunAsync(async () => {
       const { name, filePath: dest } = await fileService.importResourceFile(filePath, type)
@@ -162,6 +167,12 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     })
   )
 
+  // ============ 反馈模板 ============
+  ipcMain.handle('feedbackTemplate:list', (_e, q) => tryRun(() => feedbackTemplateRepo.list(q)))
+  ipcMain.handle('feedbackTemplate:create', (_e, input) => tryRun(() => feedbackTemplateRepo.create(input)))
+  ipcMain.handle('feedbackTemplate:update', (_e, id, input) => tryRun(() => feedbackTemplateRepo.update(id, input)))
+  ipcMain.handle('feedbackTemplate:remove', (_e, id) => tryRun(() => feedbackTemplateRepo.remove(id)))
+
   // ============ AI 课表导入 ============
   ipcMain.handle('schedule:parseText', async (_e, text) =>
     tryRunAsync(() => scheduleService.parseText(text))
@@ -197,6 +208,15 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // ============ 仪表盘 ============
   ipcMain.handle('dashboard:get', () => tryRun(() => todoService.buildDashboard()))
 
+  // ============ 数据备份 ============
+  ipcMain.handle('data:export', () => tryRun(() => dataService.exportAll()))
+  ipcMain.handle('data:saveExportToFile', (_e, json) => tryRun(() => dataService.saveExportToFile(json)))
+  ipcMain.handle('data:pickImportFile', async () => tryRunAsync(async () => dataService.pickImportFile()))
+  ipcMain.handle('data:importFromFile', (_e, filePath) => tryRun(() => dataService.importFromFile(filePath)))
+
+  // ============ 学生学习历史 ============
+  ipcMain.handle('studentHistory:get', (_e, studentId) => tryRun(() => historyService.getStudentHistory(studentId)))
+
   // ============ Scratch ============
   ipcMain.handle('scratch:launch', async (_e, versionId) =>
     tryRunAsync(() => scratchService.launch(versionId))
@@ -207,6 +227,13 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   )
   ipcMain.handle('scratch:saveToResource', async (_e, payload) =>
     tryRunAsync(() => scratchService.saveToResource(payload))
+  )
+  ipcMain.handle('scratch:pickResourceFile', async () =>
+    tryRunAsync(async () => {
+      const p = await fileService.pickResourceFile?.()
+      if (!p) throw new Error('取消选择')
+      return p
+    })
   )
 
   // ============ 文档中心 ============

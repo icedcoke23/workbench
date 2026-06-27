@@ -249,6 +249,59 @@ export interface DashboardData {
     weekLessonCount: number
     pendingFeedbackCount: number
   }
+  charts?: DashboardCharts
+}
+
+export interface DashboardCharts {
+  weekdayLessonCounts: number[]
+  classStudentCounts: Array<{ name: string; count: number; type: ClassType }>
+  feedbackStats: { draft: number; published: number }
+}
+
+// ============ 反馈模板 ============
+export type FeedbackTemplateCategory =
+  | 'general'
+  | 'praise'
+  | 'suggestion'
+  | 'progress'
+  | 'custom'
+export interface FeedbackTemplate {
+  id: ID
+  name: string
+  category: FeedbackTemplateCategory
+  content: string
+  isBuiltin: boolean
+  sortOrder?: number
+  createdAt: string
+  updatedAt: string
+}
+export interface FeedbackTemplateInput {
+  name: string
+  category?: FeedbackTemplateCategory
+  content: string
+  sortOrder?: number
+}
+
+// ============ 学生学习历史 ============
+export interface StudentHistory {
+  student: Student
+  classes: Array<{ id: ID; name: string; type: ClassType; totalScore: number }>
+  lessons: Array<{
+    id: ID
+    className: string
+    startTime: string
+    status: LessonStatus
+    subject?: string | null
+    scoreChange: number
+    isPicked: boolean
+    note?: string | null
+  }>
+  stats: {
+    totalLessons: number
+    totalScore: number
+    pickedCount: number
+    finishedRate: number
+  }
 }
 
 // ============ Scratch 保存事件 ============
@@ -261,3 +314,27 @@ export interface ArchiveTarget {
   versionName: string
   notes?: string
 }
+
+// ============ 菜单 / 快捷键 ============
+export type ViewName =
+  | 'dashboard'
+  | 'students'
+  | 'classes'
+  | 'prep'
+  | 'teaching'
+  | 'post'
+  | 'settings'
+
+export type MenuAction =
+  | { type: 'navigate'; view: ViewName }
+  | { type: 'toggle-sidebar' }
+  | { type: 'new-item' }
+  | { type: 'refresh' }
+  | { type: 'export-data' }
+  | { type: 'import-data' }
+  | { type: 'reload' }
+  | { type: 'toggle-devtools' }
+  | { type: 'zoom-in' }
+  | { type: 'zoom-out' }
+  | { type: 'zoom-reset' }
+  | { type: 'about' }

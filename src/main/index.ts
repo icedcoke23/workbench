@@ -7,10 +7,14 @@ import { registerScratchIpc, setMainWindow } from './services/scratch'
 import { regenerateAutoTodos } from './services/todos'
 import { getSync } from './database/repositories/settings'
 import { syncNow } from './services/sync'
+import { initLogger, getLogger } from './services/logger'
+import { buildAppMenu } from './menu'
 
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): BrowserWindow {
+  // 开发环境使用本地图标，打包后由 electron-builder 注入图标
+  const iconPath = app.isPackaged ? undefined : join(__dirname, '../../build/icon.png')
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -19,6 +23,7 @@ function createWindow(): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     title: 'Scratch 教学工作台',
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -36,6 +41,11 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
+  // 渲染进程崩溃时记录日志
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    getLogger().error('renderer', '渲染进程崩溃', { details })
+  })
+
   // 开发环境加载 dev server，生产环境加载打包文件
   if (process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -46,14 +56,36 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
+// 全局异常捕获（必须在 app ready 之前注册）
+process.on('uncaughtException', (err) => {
+  try {
+    getLogger().error('main', '未捕获异常', { error: err })
+  } catch {
+    console.error('未捕获异常（logger 未就绪）:', err)
+  }
+})
+process.on('unhandledRejection', (reason) => {
+  try {
+    getLogger().error('main', '未处理的 Promise 拒绝', { reason })
+  } catch {
+    console.error('未处理的 Promise 拒绝（logger 未就绪）:', reason)
+  }
+})
+
 app.whenReady().then(() => {
+  // 初始化日志
+  initLogger(process.env.NODE_ENV === 'development' ? 'debug' : 'info')
+  const log = getLogger()
+  log.info('app', '应用启动', { version: app.getVersion(), platform: process.platform })
+
   // 初始化数据库
   const dbPath = join(app.getPath('userData'), 'workbench.db')
   initDatabase(dbPath)
+  log.info('db', '数据库已初始化', { path: dbPath })
 
   // 应用基础设置
   electronApp.setAppUserModelId('com.icedcoke23.workbench')
-  Menu.setApplicationMenu(null)
+  Menu.setApplicationMenu(buildAppMenu(() => mainWindow))
 
   // 注册 IPC
   registerIpc(() => mainWindow)
@@ -67,13 +99,13 @@ app.whenReady().then(() => {
   try {
     regenerateAutoTodos()
   } catch (e) {
-    console.error('生成待办失败', e)
+    log.error('app', '生成待办失败', { error: e })
   }
 
   // 启动时若开启自动同步，后台执行一次
   const sync = getSync()
   if (sync.enabled && sync.autoSync) {
-    syncNow().catch((e) => console.error('启动同步失败', e))
+    syncNow().catch((e) => log.error('sync', '启动同步失败', { error: e }))
   }
 
   app.on('activate', () => {

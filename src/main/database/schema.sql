@@ -177,3 +177,16 @@ CREATE TRIGGER IF NOT EXISTS trg_ideas_updated
 CREATE TRIGGER IF NOT EXISTS trg_feedbacks_updated
   AFTER UPDATE ON feedbacks FOR EACH ROW
   BEGIN UPDATE feedbacks SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id; END;
+
+-- 反馈模板（内置 + 自定义）
+CREATE TABLE IF NOT EXISTS feedback_templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  category TEXT DEFAULT 'general',
+  content TEXT NOT NULL,
+  is_builtin INTEGER DEFAULT 0,
+  sort_order INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_fb_templates_category ON feedback_templates(category);

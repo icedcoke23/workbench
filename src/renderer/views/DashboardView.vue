@@ -28,6 +28,88 @@
       </a-col>
     </a-row>
 
+    <!-- 图表展示 -->
+    <a-row v-if="charts" :gutter="16" class="chart-row">
+      <a-col :span="10">
+        <a-card title="本周每日课时分布" class="section-card">
+          <div class="bar-chart">
+            <div
+              v-for="(count, i) in charts.weekdayLessonCounts"
+              :key="i"
+              class="bar-col"
+            >
+              <div class="bar" :style="{ height: barHeight(count, maxWeekdayCount) + 'px' }">
+                <span class="bar-value">{{ count }}</span>
+              </div>
+              <div class="bar-label">{{ weekdayLabels[i] }}</div>
+            </div>
+          </div>
+        </a-card>
+      </a-col>
+      <a-col :span="8">
+        <a-card title="班级学生数分布" class="section-card">
+          <div v-if="charts.classStudentCounts.length === 0" class="chart-empty">暂无班级数据</div>
+          <div v-else class="hbar-list">
+            <div
+              v-for="(c, i) in charts.classStudentCounts"
+              :key="i"
+              class="hbar-item"
+            >
+              <span class="hbar-name">{{ c.name }}</span>
+              <div class="hbar-track">
+                <div
+                  class="hbar-fill"
+                  :class="`fill-${c.type}`"
+                  :style="{ width: barWidth(c.count, maxClassStudentCount) + '%' }"
+                ></div>
+              </div>
+              <span class="hbar-count">{{ c.count }}</span>
+            </div>
+          </div>
+        </a-card>
+      </a-col>
+      <a-col :span="6">
+        <a-card title="反馈状态" class="section-card">
+          <div class="donut">
+            <svg class="donut-svg" viewBox="0 0 100 100">
+              <circle
+                cx="50"
+                cy="50"
+                r="40"
+                class="donut-track"
+                fill="none"
+                stroke="#f0f0f0"
+                stroke-width="12"
+              />
+              <circle
+                cx="50"
+                cy="50"
+                r="40"
+                class="donut-published"
+                fill="none"
+                stroke="#52c41a"
+                stroke-width="12"
+                :stroke-dasharray="`${publishedDash} ${donutCircumference}`"
+                transform="rotate(-90 50 50)"
+              />
+            </svg>
+            <div class="donut-center">
+              <div class="donut-percent">{{ publishedPercent }}%</div>
+              <div class="donut-text">已发布</div>
+            </div>
+          </div>
+          <div class="donut-legend">
+            <span class="legend-item">
+              <i class="legend-dot legend-published"></i>已发布 {{ charts.feedbackStats.published }}
+            </span>
+            <span class="legend-item">
+              <i class="legend-dot legend-draft"></i>草稿 {{ charts.feedbackStats.draft }}
+            </span>
+          </div>
+        </a-card>
+      </a-col>
+    </a-row>
+
     <!-- AI 课表导入 -->
     <a-card title="AI 课表导入" class="section-card">
       <a-textarea
@@ -191,8 +273,10 @@ import {
   ExclamationCircleOutlined
 } from '@ant-design/icons-vue'
 import { call } from '@renderer/api'
+import { subscribeRefresh } from '@renderer/composables/useShortcuts'
 import dayjs from 'dayjs'
 import type {
+  DashboardCharts,
   DashboardData,
   Lesson,
   ScheduleParseResult,
@@ -211,6 +295,8 @@ const stats = ref<DashboardData['stats']>({
 })
 const todos = ref<Todo[]>([])
 const weekLessons = ref<Lesson[]>([])
+// 图表数据（本周课时分布、班级学生数分布、反馈状态）
+const charts = ref<DashboardCharts | null>(null)
 
 const scheduleText = ref('')
 const parseResult = ref<ScheduleParseResult | null>(null)
@@ -279,12 +365,62 @@ function lessonColor(lesson: Lesson): string {
   return 'blue'
 }
 
+// ============ 图表相关计算与辅助 ============
+// 图表横轴标签：周一 ~ 周日（与 weekdayLessonCounts 下标对应）
+const weekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+// 本周每日课时最大值（用于柱状图高度归一化，至少为 1 避免除零）
+const maxWeekdayCount = computed(() => {
+  const arr = charts.value?.weekdayLessonCounts ?? []
+  return Math.max(1, ...arr)
+})
+
+// 班级学生数最大值（用于水平条宽度归一化）
+const maxClassStudentCount = computed(() => {
+  const arr = charts.value?.classStudentCounts ?? []
+  return Math.max(1, ...arr.map((c) => c.count))
+})
+
+// 反馈总数 = 草稿 + 已发布
+const feedbackTotal = computed(
+  () => (charts.value?.feedbackStats.draft ?? 0) + (charts.value?.feedbackStats.published ?? 0)
+)
+
+// 已发布反馈百分比（0~100）
+const publishedPercent = computed(() => {
+  const total = feedbackTotal.value
+  if (total <= 0) return 0
+  return Math.round(((charts.value?.feedbackStats.published ?? 0) / total) * 100)
+})
+
+// 环形图周长（半径 40），用于计算已发布弧长
+const donutCircumference = 2 * Math.PI * 40
+// 已发布反馈对应的弧长
+const publishedDash = computed(() => {
+  const total = feedbackTotal.value
+  if (total <= 0) return 0
+  return ((charts.value?.feedbackStats.published ?? 0) / total) * donutCircumference
+})
+
+// 柱状图高度（px）：按 value/max 归一化到最大 120px
+function barHeight(value: number, max: number): number {
+  if (max <= 0) return 0
+  return Math.round((value / max) * 120)
+}
+
+// 水平条宽度（百分比）：按 value/max 归一化到 0~100
+function barWidth(value: number, max: number): number {
+  if (max <= 0) return 0
+  return Math.round((value / max) * 100)
+}
+
 async function loadDashboard(): Promise<void> {
   try {
     const data = await call(window.api.dashboard.get())
     stats.value = data.stats
     todos.value = data.todos ?? []
     weekLessons.value = data.weekLessons ?? []
+    charts.value = data.charts ?? null
   } catch (e) {
     message.error(String(e))
   }
@@ -424,7 +560,11 @@ async function onDrop(status: TodoStatus): Promise<void> {
   }
 }
 
-onMounted(loadDashboard)
+onMounted(() => {
+  loadDashboard()
+  // 订阅全局刷新事件，刷新时重新加载仪表盘
+  subscribeRefresh(loadDashboard)
+})
 </script>
 
 <style scoped>
@@ -582,5 +722,157 @@ onMounted(loadDashboard)
 }
 .lesson-class {
   color: #4b5563;
+}
+/* ============ 图表样式 ============ */
+.chart-row {
+  margin-bottom: 16px;
+}
+.chart-empty {
+  text-align: center;
+  color: #9ca3af;
+  font-size: 13px;
+  padding: 24px 0;
+}
+/* 柱状图（本周每日课时） */
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 160px;
+  padding-top: 12px;
+}
+.bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.bar {
+  width: 100%;
+  max-width: 36px;
+  min-height: 4px;
+  background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
+  border-radius: 4px 4px 0 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  padding-top: 2px;
+}
+.bar-value {
+  font-weight: 600;
+}
+.bar-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+/* 水平条（班级学生数） */
+.hbar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+.hbar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hbar-name {
+  width: 84px;
+  font-size: 12px;
+  color: #374151;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+.hbar-track {
+  flex: 1;
+  height: 14px;
+  background: #f3f4f6;
+  border-radius: 7px;
+  overflow: hidden;
+}
+.hbar-fill {
+  height: 100%;
+  border-radius: 7px;
+  transition: width 0.3s;
+}
+.fill-regular {
+  background: #3b82f6;
+}
+.fill-training {
+  background: #f97316;
+}
+.fill-temp {
+  background: #22c55e;
+}
+.hbar-count {
+  width: 28px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+  flex-shrink: 0;
+}
+/* 环形图（反馈状态） */
+.donut {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  margin: 0 auto;
+}
+.donut-svg {
+  width: 140px;
+  height: 140px;
+}
+.donut-published {
+  transition: stroke-dasharray 0.3s;
+}
+.donut-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+.donut-percent {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.2;
+}
+.donut-text {
+  font-size: 12px;
+  color: #6b7280;
+}
+.donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: #4b5563;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.legend-published {
+  background: #52c41a;
+}
+.legend-draft {
+  background: #f0f0f0;
+  border: 1px solid #d9d9d9;
 }
 </style>

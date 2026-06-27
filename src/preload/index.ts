@@ -12,10 +12,13 @@ const apiNamespaces: Array<keyof WorkbenchAPI> = [
   'todo',
   'resource',
   'feedback',
+  'feedbackTemplate',
   'schedule',
   'scratch',
   'settings',
   'dashboard',
+  'data',
+  'studentHistory',
   'doc',
   'file'
 ]
@@ -47,6 +50,11 @@ const events: WorkbenchEvents = {
     const listener = (_e: IpcRendererEvent, status: unknown) => cb(status as never)
     ipcRenderer.on('sync:status', listener)
     return () => ipcRenderer.removeListener('sync:status', listener)
+  },
+  'menu:action': (cb) => {
+    const listener = (_e: IpcRendererEvent, action: unknown) => cb(action as never)
+    ipcRenderer.on('menu:action', listener)
+    return () => ipcRenderer.removeListener('menu:action', listener)
   }
 }
 

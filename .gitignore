@@ -15,3 +15,5 @@ data/
   workbench.db-journal
   resources/
   exports/
+.pnpm-store/
+

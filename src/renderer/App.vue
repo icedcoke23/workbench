@@ -15,6 +15,14 @@
           <DashboardOutlined />
           <span>工作看板</span>
         </a-menu-item>
+        <a-menu-item key="students">
+          <TeamOutlined />
+          <span>学生管理</span>
+        </a-menu-item>
+        <a-menu-item key="classes">
+          <BankOutlined />
+          <span>班级管理</span>
+        </a-menu-item>
         <a-menu-item key="prep">
           <BulbOutlined />
           <span>备课中心</span>
@@ -61,6 +69,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   DashboardOutlined,
+  TeamOutlined,
+  BankOutlined,
   BulbOutlined,
   PlayCircleOutlined,
   FileTextOutlined,
@@ -71,6 +81,8 @@ import {
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { call } from '@renderer/api'
+import { useShortcuts, triggerRefresh, triggerNewItem } from '@renderer/composables/useShortcuts'
+import type { ViewName } from '@shared/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -97,6 +109,66 @@ async function goSync(): Promise<void> {
     message.error(String(e))
   }
 }
+
+// ============ 快捷键 / 菜单动作处理 ============
+function onNavigate(view: ViewName): void {
+  router.push({ name: view })
+}
+
+function onToggleSidebar(): void {
+  collapsed.value = !collapsed.value
+}
+
+function onZoomIn(): void {
+  // 放大字号，上限 22px
+  const cur = parseInt(document.body.style.fontSize || '16', 10) || 16
+  document.body.style.fontSize = Math.min(cur + 1, 22) + 'px'
+}
+
+function onZoomOut(): void {
+  // 缩小字号，下限 12px
+  const cur = parseInt(document.body.style.fontSize || '16', 10) || 16
+  document.body.style.fontSize = Math.max(cur - 1, 12) + 'px'
+}
+
+function onZoomReset(): void {
+  // 重置字号：清空内联样式，恢复默认
+  document.body.style.fontSize = ''
+}
+
+function onExportData(): void {
+  // 跳转设置页并通知备份面板执行导出
+  router
+    .push({ name: 'settings' })
+    .then(() =>
+      window.dispatchEvent(
+        new CustomEvent('workbench:goto-backup', { detail: { action: 'export' } })
+      )
+    )
+}
+
+function onImportData(): void {
+  // 跳转设置页并通知备份面板执行导入
+  router
+    .push({ name: 'settings' })
+    .then(() =>
+      window.dispatchEvent(
+        new CustomEvent('workbench:goto-backup', { detail: { action: 'import' } })
+      )
+    )
+}
+
+useShortcuts({
+  onNavigate,
+  onToggleSidebar,
+  onNewItem: triggerNewItem,
+  onRefresh: triggerRefresh,
+  onExportData,
+  onImportData,
+  onZoomIn,
+  onZoomOut,
+  onZoomReset
+})
 
 onMounted(async () => {
   try {

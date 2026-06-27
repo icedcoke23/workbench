@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4F97FF"/>
+      <stop offset="100%" stop-color="#2D6BDB"/>
+    </linearGradient>
+    <linearGradient id="block" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFAB1A"/>
+      <stop offset="100%" stop-color="#FF8A00"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="3" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.25"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="256" height="256" rx="48" ry="48" fill="url(#bg)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="92" y="56" width="36" height="18" rx="6" fill="url(#block)"/>
+    <rect x="128" y="56" width="36" height="18" rx="6" fill="url(#block)"/>
+
+    <path d="M 60 74
+             L 60 182
+             Q 60 196 74 196
+             L 92 196
+             L 92 210
+             Q 92 218 100 218
+             L 120 218
+             Q 128 218 128 210
+             L 128 196
+             L 196 196
+             Q 210 196 210 182
+             L 210 74
+             Q 210 60 196 60
+             L 74 60
+             Q 60 60 60 74 Z"
+          fill="url(#block)"/>
+
+    <text x="135" y="148"
+          font-family="'Segoe UI', 'Microsoft YaHei', sans-serif"
+          font-size="86"
+          font-weight="800"
+          fill="#FFFFFF"
+          text-anchor="middle"
+          dominant-baseline="middle">W</text>
+  </g>
+
+  <circle cx="200" cy="46" r="8" fill="#FFD86B" opacity="0.9"/>
+  <circle cx="220" cy="68" r="5" fill="#FFFFFF" opacity="0.6"/>
+</svg>

@@ -47,3 +47,17 @@ export async function importResourceFile(
   if (existsSync(filePath)) await copyFile(filePath, dest)
   return { name, filePath: dest }
 }
+
+/** 选择 Scratch 资源文件（.sb3 / .json），返回路径或 null（用户取消） */
+export async function pickResourceFile(): Promise<string | null> {
+  const res = await dialog.showOpenDialog({
+    title: '选择 Scratch 资源文件',
+    filters: [
+      { name: 'Scratch 项目', extensions: ['sb3'] },
+      { name: 'JSON', extensions: ['json'] }
+    ],
+    properties: ['openFile']
+  })
+  if (res.canceled || !res.filePaths.length) return null
+  return res.filePaths[0]
+}

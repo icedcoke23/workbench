@@ -186,6 +186,7 @@ import {
   ClockCircleOutlined
 } from '@ant-design/icons-vue'
 import { call } from '@renderer/api'
+import { subscribeRefresh } from '@renderer/composables/useShortcuts'
 import type { ClassInfo, Lesson, Student } from '@shared/types'
 import dayjs from 'dayjs'
 
@@ -529,6 +530,11 @@ onMounted(async () => {
   } finally {
     classLoading.value = false
   }
+
+  // 订阅全局刷新事件：刷新时重新加载班级列表
+  subscribeRefresh(async () => {
+    classes.value = await call(window.api.class.list())
+  })
 })
 </script>
 

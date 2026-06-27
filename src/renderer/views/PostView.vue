@@ -165,6 +165,7 @@ import {
 } from '@ant-design/icons-vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import { call } from '@renderer/api'
+import { subscribeRefresh } from '@renderer/composables/useShortcuts'
 import type { ClassInfo, Feedback, Lesson } from '@shared/types'
 
 const activeTab = ref<'weekly' | 'quarterly'>('weekly')
@@ -217,6 +218,8 @@ function formatPeriod(r: Feedback): string {
 // feedback:chunk 监听器注册（preload 实现为 (cb) => unsub，类型声明略有偏差，这里做类型断言）
 type FeedbackChunkRegistrar = (cb: (delta: string) => void) => () => void
 let offChunk: (() => void) | null = null
+// 全局刷新订阅取消函数
+let offRefresh: (() => void) | null = null
 
 async function loadClasses(): Promise<void> {
   try {
@@ -383,6 +386,12 @@ onMounted(async () => {
     previewText.value += delta
   })
 
+  // 订阅全局刷新事件：刷新时重新加载班级列表
+  // 注：任务描述中的 loadTemplates 在本视图不存在，此处仅刷新班级数据
+  offRefresh = subscribeRefresh(() => {
+    loadClasses()
+  })
+
   await loadClasses()
   if (classId.value) await onClassChange(classId.value)
 
@@ -397,6 +406,8 @@ onMounted(async () => {
 onUnmounted(() => {
   offChunk?.()
   offChunk = null
+  offRefresh?.()
+  offRefresh = null
 })
 </script>
 

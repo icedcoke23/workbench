@@ -9,6 +9,18 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '工作看板', icon: 'DashboardOutlined' }
   },
   {
+    path: '/students',
+    name: 'students',
+    component: () => import('@renderer/views/StudentsView.vue'),
+    meta: { title: '学生管理', icon: 'TeamOutlined' }
+  },
+  {
+    path: '/classes',
+    name: 'classes',
+    component: () => import('@renderer/views/ClassesView.vue'),
+    meta: { title: '班级管理', icon: 'BankOutlined' }
+  },
+  {
     path: '/prep',
     name: 'prep',
     component: () => import('@renderer/views/PrepView.vue'),

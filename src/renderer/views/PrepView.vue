@@ -116,6 +116,15 @@
             <a-select-option value="sprite">角色</a-select-option>
             <a-select-option value="sound">音效</a-select-option>
           </a-select>
+          <a-select
+            v-model:value="resourceFilter.tag"
+            style="width: 180px"
+            placeholder="按标签筛选"
+            allow-clear
+            show-search
+            :options="tagOptions"
+            @change="loadResources"
+          />
           <a-input-search
             v-model:value="resourceFilter.keyword"
             placeholder="按名称搜索素材"
@@ -149,9 +158,14 @@
               {{ formatDate(record.createdAt) }}
             </template>
             <template v-else-if="column.key === 'action'">
-              <a-popconfirm title="确认删除该素材？" @confirm="removeResource(record.id)">
-                <a-button size="small" danger><DeleteOutlined /> 删除</a-button>
-              </a-popconfirm>
+              <a-space :size="6">
+                <a-button size="small" @click="openEditResourceModal(record)">
+                  <EditOutlined /> 编辑
+                </a-button>
+                <a-popconfirm title="确认删除该素材？" @confirm="removeResource(record.id)">
+                  <a-button size="small" danger><DeleteOutlined /></a-button>
+                </a-popconfirm>
+              </a-space>
             </template>
           </template>
         </a-table>
@@ -298,6 +312,31 @@
         />
       </div>
     </a-modal>
+
+    <!-- ============ 编辑资源 Modal（标签 + 名称） ============ -->
+    <a-modal
+      v-model:open="editResourceModalVisible"
+      title="编辑素材"
+      :confirm-loading="editResourceSubmitting"
+      @ok="submitEditResource"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="名称" required>
+          <a-input v-model:value="editResourceForm.name" placeholder="素材名称" />
+        </a-form-item>
+        <a-form-item label="标签">
+          <a-select
+            v-model:value="editResourceForm.tags"
+            mode="tags"
+            placeholder="输入标签后回车添加，可选择已有标签"
+            :options="tagOptions"
+            :token-separators="[',']"
+            allow-clear
+          />
+          <div class="tag-tip">提示：输入文本后按回车或逗号添加标签，已使用的标签会自动出现在候选项中。</div>
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -314,11 +353,13 @@ import {
   ImportOutlined,
   PlayCircleOutlined,
   LinkOutlined,
-  GlobalOutlined
+  GlobalOutlined,
+  EditOutlined
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { call } from '@renderer/api'
+import { subscribeRefresh, subscribeNewItem } from '@renderer/composables/useShortcuts'
 import type {
   Idea,
   IdeaStatus,
@@ -493,9 +534,10 @@ async function submitNewVersion(): Promise<void> {
 // ============ 资源库 ============
 const resources = ref<Resource[]>([])
 const resourcesLoading = ref(false)
-const resourceFilter = reactive<{ type: string; keyword: string }>({
+const resourceFilter = reactive<{ type: string; keyword: string; tag: string | undefined }>({
   type: '',
-  keyword: ''
+  keyword: '',
+  tag: undefined
 })
 
 const resourceColumns = [
@@ -503,8 +545,20 @@ const resourceColumns = [
   { title: '类型', dataIndex: 'type', key: 'type', width: 100 },
   { title: '标签', dataIndex: 'tags', key: 'tags' },
   { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 160 },
-  { title: '操作', key: 'action', width: 110 }
+  { title: '操作', key: 'action', width: 180 }
 ]
+
+// 全部可用标签（用于筛选下拉与编辑时的可选项）
+const allTags = ref<string[]>([])
+const tagOptions = computed(() => allTags.value.map((t) => ({ value: t, label: t })))
+
+async function loadAllTags(): Promise<void> {
+  try {
+    allTags.value = await call(window.api.resource.allTags())
+  } catch {
+    // 忽略错误，保留旧值
+  }
+}
 
 async function loadResources(): Promise<void> {
   resourcesLoading.value = true
@@ -512,7 +566,8 @@ async function loadResources(): Promise<void> {
     resources.value = await call(
       window.api.resource.list({
         type: resourceFilter.type || undefined,
-        keyword: resourceFilter.keyword.trim() || undefined
+        keyword: resourceFilter.keyword.trim() || undefined,
+        tag: resourceFilter.tag || undefined
       })
     )
   } catch (e) {
@@ -527,6 +582,7 @@ async function importResource(): Promise<void> {
     const res = await call(window.api.scratch.pickResourceFile())
     message.success(`已导入素材：${res.name}`)
     await loadResources()
+    await loadAllTags()
   } catch (e) {
     message.error(`导入失败：${String(e instanceof Error ? e.message : e)}`)
   }
@@ -537,8 +593,51 @@ async function removeResource(id: string): Promise<void> {
     await call(window.api.resource.remove(id))
     message.success('已删除素材')
     await loadResources()
+    await loadAllTags()
   } catch (e) {
     message.error(`删除失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
+// 资源编辑（标签 + 名称）
+const editResourceModalVisible = ref(false)
+const editResourceSubmitting = ref(false)
+const editResourceForm = reactive<{ id: string; name: string; tags: string[] }>({
+  id: '',
+  name: '',
+  tags: []
+})
+
+function openEditResourceModal(record: Resource): void {
+  editResourceForm.id = record.id
+  editResourceForm.name = record.name
+  editResourceForm.tags = [...(record.tags || [])]
+  editResourceModalVisible.value = true
+}
+
+async function submitEditResource(): Promise<void> {
+  const name = editResourceForm.name.trim()
+  if (!name) {
+    message.warning('请输入名称')
+    return
+  }
+  // 清理标签：去空白、去重
+  const tags = Array.from(
+    new Set(editResourceForm.tags.map((t) => t.trim()).filter(Boolean))
+  )
+  editResourceSubmitting.value = true
+  try {
+    await call(
+      window.api.resource.update(editResourceForm.id, { name, tags })
+    )
+    message.success('已更新')
+    editResourceModalVisible.value = false
+    await loadResources()
+    await loadAllTags()
+  } catch (e) {
+    message.error(`更新失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    editResourceSubmitting.value = false
   }
 }
 
@@ -687,21 +786,39 @@ async function submitSave(): Promise<void> {
 type SaveHandler = (payload: ScratchSavePayload) => void
 type SubscribeSave = (handler: SaveHandler) => () => void
 let offScratchSave: (() => void) | null = null
+// 全局刷新与新增项订阅取消函数
+let offRefresh: (() => void) | null = null
+let offNewItem: (() => void) | null = null
 
 onMounted(() => {
   loadIdeas()
   loadResources()
+  loadAllTags()
   loadLessons()
 
   const subscribe = window.events['scratch:save-request'] as unknown as SubscribeSave
   offScratchSave = subscribe((payload) => {
     handleScratchSave(payload)
   })
+
+  // 订阅全局刷新事件：刷新时重新加载点子库、资源库、标签、课次
+  offRefresh = subscribeRefresh(() => {
+    loadIdeas()
+    loadResources()
+    loadAllTags()
+    loadLessons()
+  })
+  // 订阅全局新增事件：触发新建点子弹窗
+  offNewItem = subscribeNewItem(openNewIdeaModal)
 })
 
 onUnmounted(() => {
   offScratchSave?.()
   offScratchSave = null
+  offRefresh?.()
+  offRefresh = null
+  offNewItem?.()
+  offNewItem = null
 })
 </script>
 
@@ -795,5 +912,10 @@ onUnmounted(() => {
 .save-resource-tip {
   border-top: 1px solid #eef0f4;
   padding-top: 12px;
+}
+.tag-tip {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 4px;
 }
 </style>

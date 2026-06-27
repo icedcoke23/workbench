@@ -177,17 +177,63 @@
             </div>
           </a-card>
         </a-tab-pane>
+
+        <!-- ============ 数据备份 ============ -->
+        <a-tab-pane key="backup" tab="数据备份">
+          <a-card>
+            <a-alert
+              type="warning"
+              show-icon
+              style="margin-bottom: 16px"
+              message="注意事项"
+              description="导出将生成包含全部数据的 JSON 文件；导入会覆盖当前数据且不可恢复，请谨慎操作。建议在导入前先导出一份备份。"
+            />
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <div class="backup-card">
+                  <div class="backup-desc">将当前所有数据导出为 JSON 文件保存到本地。</div>
+                  <a-button type="primary" :loading="exporting" @click="onExport">
+                    <DownloadOutlined />
+                    导出数据
+                  </a-button>
+                  <div v-if="lastExportPath" class="backup-result">
+                    上次导出路径：{{ lastExportPath }}
+                  </div>
+                </div>
+              </a-col>
+              <a-col :span="12">
+                <div class="backup-card">
+                  <div class="backup-desc">从 JSON 文件导入数据，将覆盖当前数据。</div>
+                  <a-button danger :loading="importing" @click="onImport">
+                    <UploadOutlined />
+                    导入数据
+                  </a-button>
+                  <div v-if="lastImportInfo" class="backup-result">
+                    上次导入：{{ lastImportInfo.tables }} 张表 / {{ lastImportInfo.rows }} 行
+                  </div>
+                </div>
+              </a-col>
+            </a-row>
+          </a-card>
+        </a-tab-pane>
       </a-tabs>
     </a-spin>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
-import { SaveOutlined, SyncOutlined } from '@ant-design/icons-vue'
+import { ref, reactive, onMounted, h } from 'vue'
+import { message, Modal } from 'ant-design-vue'
+import {
+  SaveOutlined,
+  SyncOutlined,
+  DownloadOutlined,
+  UploadOutlined,
+  ExclamationCircleOutlined
+} from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { call } from '@renderer/api'
+import { subscribeRefresh } from '@renderer/composables/useShortcuts'
 import type {
   AISettings,
   AppSettings,
@@ -196,8 +242,14 @@ import type {
   WeChatSettings
 } from '@shared/types'
 
-const activeTab = ref<'ai' | 'sync' | 'wechat' | 'scratch'>('ai')
+const activeTab = ref<'ai' | 'sync' | 'wechat' | 'scratch' | 'backup'>('ai')
 const loading = ref(true)
+
+// 数据备份相关状态
+const exporting = ref(false)
+const importing = ref(false)
+const lastExportPath = ref('')
+const lastImportInfo = ref<{ tables: number; rows: number } | null>(null)
 
 const ai = reactive<AISettings>({
   useCustomAI: false,
@@ -351,7 +403,73 @@ async function saveScratch(): Promise<void> {
   }
 }
 
-onMounted(load)
+// ============ 数据备份 ============
+// 导出数据：导出为 JSON 字符串后保存到文件
+async function onExport(): Promise<void> {
+  exporting.value = true
+  try {
+    const json = await call(window.api.data.export())
+    const path = await call(window.api.data.saveExportToFile(json))
+    lastExportPath.value = path
+    message.success('数据已导出')
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    exporting.value = false
+  }
+}
+
+// 导入数据：二次确认 -> 选择文件 -> 导入
+function onImport(): void {
+  Modal.confirm({
+    title: '导入数据',
+    icon: h(ExclamationCircleOutlined),
+    content: '导入将覆盖当前数据，该操作不可恢复，确定继续吗？',
+    okText: '选择文件并导入',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      importing.value = true
+      try {
+        const filePath = await call(window.api.data.pickImportFile())
+        // 用户取消选择则直接返回
+        if (!filePath) {
+          importing.value = false
+          return
+        }
+        const info = await call(window.api.data.importFromFile(filePath))
+        lastImportInfo.value = info
+        message.success(`导入成功：${info.tables} 张表 / ${info.rows} 行`)
+        // 导入后重新加载设置
+        await load()
+      } catch (e) {
+        message.error(String(e))
+      } finally {
+        importing.value = false
+      }
+    }
+  })
+}
+
+// 监听来自快捷键的备份动作：切换到备份 tab 并触发对应操作
+function handleBackupAction(e: Event): void {
+  const detail = (e as CustomEvent<{ action: string }>).detail
+  if (!detail) return
+  activeTab.value = 'backup'
+  if (detail.action === 'export') {
+    onExport()
+  } else if (detail.action === 'import') {
+    onImport()
+  }
+}
+
+onMounted(() => {
+  load()
+  // 订阅全局刷新事件
+  subscribeRefresh(load)
+  // 监听快捷键触发的备份动作
+  window.addEventListener('workbench:goto-backup', handleBackupAction)
+})
 </script>
 
 <style scoped>
@@ -364,5 +482,29 @@ onMounted(load)
   margin-left: 12px;
   color: #9ca3af;
   font-size: 12px;
+}
+.backup-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #eef0f4;
+  border-radius: 8px;
+  background: #fafafa;
+  height: 100%;
+}
+.backup-desc {
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.6;
+}
+.backup-result {
+  font-size: 12px;
+  color: #6b7280;
+  word-break: break-all;
+  background: #fff;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #eef0f4;
 }
 </style>

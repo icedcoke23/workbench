@@ -6,6 +6,8 @@ import type {
   ClassInput,
   DashboardData,
   Feedback,
+  FeedbackTemplate,
+  FeedbackTemplateInput,
   ID,
   Idea,
   IdeaInput,
@@ -14,6 +16,7 @@ import type {
   Lesson,
   LessonInput,
   LessonRecord,
+  MenuAction,
   PageQuery,
   Resource,
   ResourceInput,
@@ -21,6 +24,7 @@ import type {
   ScratchSavePayload,
   ScoreAction,
   Student,
+  StudentHistory,
   StudentInput,
   SyncSettings,
   Todo,
@@ -82,10 +86,12 @@ export interface WorkbenchAPI {
   }
   // 资源库
   resource: {
-    list: (q?: { type?: string; classId?: ID; keyword?: string }) => Promise<Result<Resource[]>>
+    list: (q?: { type?: string; classId?: ID; keyword?: string; tag?: string }) => Promise<Result<Resource[]>>
     create: (input: ResourceInput) => Promise<Result<Resource>>
+    update: (id: ID, input: Partial<ResourceInput>) => Promise<Result<Resource>>
     remove: (id: ID) => Promise<Result<void>>
     importFile: (filePath: string, type: Resource['type']) => Promise<Result<Resource>>
+    allTags: () => Promise<Result<string[]>>
   }
   // 反馈/报告
   feedback: {
@@ -97,6 +103,13 @@ export interface WorkbenchAPI {
     generateReport: (q: { classId: ID; from: string; to: string }) => Promise<Result<{ html: string; pdfPath: string }>>
     exportPdf: (feedbackId: ID) => Promise<Result<string>>
     sendWeChat: (feedbackId: ID) => Promise<Result<{ ok: boolean; message: string }>>
+  }
+  // 反馈模板
+  feedbackTemplate: {
+    list: (q?: { category?: string }) => Promise<Result<FeedbackTemplate[]>>
+    create: (input: FeedbackTemplateInput) => Promise<Result<FeedbackTemplate>>
+    update: (id: ID, input: Partial<FeedbackTemplateInput>) => Promise<Result<FeedbackTemplate>>
+    remove: (id: ID) => Promise<Result<void>>
   }
   // AI 课表导入
   schedule: {
@@ -127,6 +140,17 @@ export interface WorkbenchAPI {
   dashboard: {
     get: () => Promise<Result<DashboardData>>
   }
+  // 数据备份/导出/导入
+  data: {
+    export: () => Promise<Result<string>>
+    importFromFile: (filePath: string) => Promise<Result<{ tables: number; rows: number }>>
+    pickImportFile: () => Promise<Result<string | null>>
+    saveExportToFile: (json: string) => Promise<Result<string>>
+  }
+  // 学生学习历史
+  studentHistory: {
+    get: (studentId: ID) => Promise<Result<StudentHistory>>
+  }
   // 文档中心（语雀）
   doc: {
     openUrl: (url: string) => Promise<Result<void>>
@@ -146,4 +170,5 @@ export interface WorkbenchEvents {
   'scratch:save-request': (cb: (payload: ScratchSavePayload) => void) => () => void
   'feedback:chunk': (cb: (delta: string) => void) => () => void
   'sync:status': (cb: (status: { running: boolean; message: string }) => void) => () => void
+  'menu:action': (cb: (action: MenuAction) => void) => () => void
 }
