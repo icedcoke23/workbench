@@ -3,21 +3,18 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { join } from 'path'
 import { initDatabase, closeDatabase } from './database/db'
 import { registerIpc } from './ipc'
-import { registerScratchIpc, setMainWindow } from './services/scratch'
+import { registerScratchIpc, setMainWindow, close as closeScratch } from './services/scratch'
 import { regenerateAutoTodos } from './services/todos'
 import { getSync } from './database/repositories/settings'
-import { syncNow, setSyncWindow } from './services/sync'
+import { syncNow } from './services/sync'
 import { initLogger, getLogger } from './services/logger'
 import { buildAppMenu } from './menu'
 
 let mainWindow: BrowserWindow | null = null
-let syncTimer: NodeJS.Timeout | null = null
 
 function createWindow(): BrowserWindow {
-  // 开发环境使用源码目录的图标，生产环境 exe 已嵌入图标
-  const iconPath = app.isPackaged
-    ? undefined
-    : join(__dirname, '../../build/icon.png')
+  // 开发环境使用本地图标，打包后由 electron-builder 注入图标
+  const iconPath = app.isPackaged ? undefined : join(__dirname, '../../build/icon.png')
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -31,8 +28,7 @@ function createWindow(): BrowserWindow {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false,
-      webviewTag: true
+      nodeIntegration: false
     }
   })
 
@@ -40,14 +36,14 @@ function createWindow(): BrowserWindow {
     mainWindow?.show()
   })
 
-  // 渲染进程崩溃日志
-  mainWindow.webContents.on('render-process-gone', (_e, details) => {
-    getLogger().error('renderer', '渲染进程崩溃', details)
-  })
-
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
+  })
+
+  // 渲染进程崩溃时记录日志
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    getLogger().error('renderer', '渲染进程崩溃', { details })
   })
 
   // 开发环境加载 dev server，生产环境加载打包文件
@@ -63,14 +59,14 @@ function createWindow(): BrowserWindow {
 // 全局异常捕获（必须在 app ready 之前注册）
 process.on('uncaughtException', (err) => {
   try {
-    getLogger().error('main', '未捕获异常', err)
+    getLogger().error('main', '未捕获异常', { error: err })
   } catch {
     console.error('未捕获异常（logger 未就绪）:', err)
   }
 })
 process.on('unhandledRejection', (reason) => {
   try {
-    getLogger().error('main', '未处理的 Promise 拒绝', reason)
+    getLogger().error('main', '未处理的 Promise 拒绝', { reason })
   } catch {
     console.error('未处理的 Promise 拒绝（logger 未就绪）:', reason)
   }
@@ -97,23 +93,19 @@ app.whenReady().then(() => {
 
   const win = createWindow()
   setMainWindow(win)
-  setSyncWindow(win)
   optimizer.watchWindowShortcuts(win)
 
   // 启动时自动生成待办
   try {
     regenerateAutoTodos()
   } catch (e) {
-    log.error('todo', '生成待办失败', e)
+    log.error('app', '生成待办失败', { error: e })
   }
 
-  // 启动时若开启自动同步，后台执行一次 + 定时同步（每 10 分钟）
+  // 启动时若开启自动同步，后台执行一次
   const sync = getSync()
   if (sync.enabled && sync.autoSync) {
-    syncNow().catch((e) => log.error('sync', '启动同步失败', e))
-    syncTimer = setInterval(() => {
-      syncNow().catch((e) => log.error('sync', '定时同步失败', e))
-    }, 10 * 60 * 1000)
+    syncNow().catch((e) => log.error('sync', '启动同步失败', { error: e }))
   }
 
   app.on('activate', () => {
@@ -123,16 +115,17 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   setMainWindow(null)
-  setSyncWindow(null)
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
 app.on('before-quit', () => {
-  if (syncTimer) {
-    clearInterval(syncTimer)
-    syncTimer = null
+  // 关闭 Scratch 编辑器子窗口，避免残留进程
+  try {
+    closeScratch()
+  } catch {
+    // 忽略关闭错误
   }
   closeDatabase()
 })

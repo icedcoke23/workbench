@@ -31,18 +31,25 @@ export async function sendToWeChat(params: {
   }
 
   const delay = settings.sendDelayMs ?? 800
-  const searchHotkey = settings.searchHotkey || 'CommandOrControl+F'
 
   // 设置剪贴板内容
   if (params.pdfPath && existsSync(params.pdfPath)) {
-    await setClipboardFile(params.pdfPath)
+    try {
+      await setClipboardFile(params.pdfPath)
+    } catch (e) {
+      // 剪贴板设置失败时不能继续发送，否则会粘贴旧内容造成误发
+      return {
+        ok: false,
+        message: `设置剪贴板文件失败：${e instanceof Error ? e.message : String(e)}`
+      }
+    }
   } else if (params.text) {
     clipboard.writeText(params.text)
   } else {
     return { ok: false, message: '无可发送内容' }
   }
 
-  const psScript = buildPsScript(groupName, delay, searchHotkey)
+  const psScript = buildPsScript(groupName, delay)
   try {
     const { stdout } = await execFileAsync(
       'powershell.exe',
@@ -57,21 +64,18 @@ export async function sendToWeChat(params: {
 
 /** 通过 PowerShell Set-Clipboard 设置文件（用于发送附件） */
 async function setClipboardFile(filePath: string): Promise<void> {
-  const ps = `Set-Clipboard -LiteralPath "${filePath.replace(/"/g, '""')}"`
-  try {
-    await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
-      timeout: 10_000,
-      windowsHide: true
-    })
-  } catch {
-    // 忽略：回退到文本
-  }
+  // 使用单引号字符串并转义单引号，避免 $ 变量展开与注入
+  const psLiteral = filePath.replace(/'/g, "''")
+  const ps = `Set-Clipboard -LiteralPath '${psLiteral}'`
+  await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+    timeout: 10_000,
+    windowsHide: true
+  })
 }
 
-function buildPsScript(groupName: string, delay: number, searchHotkey: string): string {
-  const titles = WECOM_TITLES.map((t) => `'${t}'`).join(',')
+function buildPsScript(groupName: string, delay: number): string {
+  const titles = WECOM_TITLES.map((t) => `'${t.replace(/'/g, "''")}'`).join(',')
   const wait = (ms: number) => `Start-Sleep -Milliseconds ${ms}`
-  const searchKeys = acceleratorToSendKeys(searchHotkey)
   return `
 $ErrorActionPreference = 'Stop'
 Add-Type @"
@@ -95,8 +99,8 @@ ${wait(200)}
 [void][Win32]::SetForegroundWindow($found)
 ${wait(delay)}
 $wsh = New-Object -ComObject WScript.Shell
-# 打开搜索（${escapePs(searchHotkey)}）
-$wsh.SendKeys('${searchKeys}')
+# 打开搜索（Ctrl+F）
+$wsh.SendKeys('^f')
 ${wait(delay)}
 # 输入群名
 $wsh.SendKeys('${escapePs(groupName)}')
@@ -112,29 +116,6 @@ $wsh.SendKeys('{ENTER}')
 ${wait(300)}
 Write-Output 'OK'
 `.trim()
-}
-
-/**
- * 将 Electron accelerator（如 CommandOrControl+F）转换为 WScript.Shell SendKeys 格式（如 ^f）
- * CommandOrControl/Ctrl → ^，Alt → %，Shift → +，字母键转小写
- */
-function acceleratorToSendKeys(accelerator: string): string {
-  const parts = accelerator.split('+')
-  let prefix = ''
-  let key = ''
-  for (const p of parts) {
-    const lower = p.trim().toLowerCase()
-    if (lower === 'commandorcontrol' || lower === 'ctrl' || lower === 'control' || lower === 'cmd' || lower === 'command') {
-      prefix += '^'
-    } else if (lower === 'alt') {
-      prefix += '%'
-    } else if (lower === 'shift') {
-      prefix += '+'
-    } else {
-      key = lower
-    }
-  }
-  return prefix + (key || 'f')
 }
 
 function escapePs(s: string): string {

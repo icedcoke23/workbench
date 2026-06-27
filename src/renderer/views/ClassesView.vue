@@ -1,135 +1,337 @@
+<template>
+  <div class="page-container">
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <a-input-search
+        v-model:value="keyword"
+        placeholder="按班级名称搜索"
+        style="width: 240px"
+        allow-clear
+        @search="loadClasses"
+      />
+      <a-space>
+        <a-button @click="loadClasses"><ReloadOutlined /> 刷新</a-button>
+        <a-button type="primary" @click="openCreate"><PlusOutlined /> 新增班级</a-button>
+      </a-space>
+    </div>
+
+    <!-- 班级表格 -->
+    <a-table
+      :data-source="classes"
+      :columns="columns"
+      :loading="loading"
+      row-key="id"
+      :pagination="{ pageSize: 10, size: 'small' }"
+      size="small"
+    >
+      <template #bodyCell="{ column, record }">
+        <template v-if="column.key === 'name'">{{ record.name }}</template>
+        <template v-else-if="column.key === 'type'">
+          <a-tag :color="classTypeColor[record.type as ClassType]">
+            {{ classTypeText[record.type as ClassType] }}
+          </a-tag>
+        </template>
+        <template v-else-if="column.key === 'schedule'">
+          {{ formatSchedule(record.scheduleRule) }}
+        </template>
+        <template v-else-if="column.key === 'studentCount'">
+          {{ record.studentCount ?? 0 }} 人
+        </template>
+        <template v-else-if="column.key === 'createdAt'">
+          {{ formatDate(record.createdAt) }}
+        </template>
+        <template v-else-if="column.key === 'action'">
+          <a-space :size="4">
+            <a-button type="link" size="small" @click="openMembers(record)">
+              <TeamOutlined /> 成员
+            </a-button>
+            <a-button type="link" size="small" @click="openEdit(record)">
+              <EditOutlined /> 编辑
+            </a-button>
+            <a-popconfirm title="确认删除该班级？" @confirm="removeClass(record.id)">
+              <a-button type="link" size="small" danger><DeleteOutlined /> 删除</a-button>
+            </a-popconfirm>
+          </a-space>
+        </template>
+      </template>
+    </a-table>
+
+    <!-- 新增/编辑 Modal -->
+    <a-modal
+      v-model:open="formVisible"
+      :title="editingId ? '编辑班级' : '新增班级'"
+      :confirm-loading="submitting"
+      ok-text="保存"
+      cancel-text="取消"
+      @ok="submitForm"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="班级名称" required>
+          <a-input v-model:value="form.name" placeholder="如：周六 Scratch 入门班" />
+        </a-form-item>
+        <a-row :gutter="12">
+          <a-col :span="12">
+            <a-form-item label="班级类型">
+              <a-select v-model:value="form.type">
+                <a-select-option value="regular">常规</a-select-option>
+                <a-select-option value="training">集训</a-select-option>
+                <a-select-option value="temp">试听</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="上课星期">
+              <a-select v-model:value="form.weekday">
+                <a-select-option v-for="(w, i) in WEEKDAY_OPTIONS" :key="i" :value="w.value">
+                  {{ w.label }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="12">
+          <a-col :span="12">
+            <a-form-item label="开始时间">
+              <a-time-picker
+                v-model:value="form.startTime"
+                format="HH:mm"
+                value-format="HH:mm"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="结束时间">
+              <a-time-picker
+                v-model:value="form.endTime"
+                format="HH:mm"
+                value-format="HH:mm"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="科目">
+          <a-input v-model:value="form.subject" placeholder="如：Scratch 游戏" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <!-- 成员管理 Modal -->
+    <a-modal
+      v-model:open="membersVisible"
+      :title="`成员管理 - ${membersClassName}`"
+      width="560px"
+      :footer="null"
+    >
+      <div class="members-add">
+        <a-select
+          v-model:value="selectedStudentIds"
+          mode="multiple"
+          placeholder="选择要添加的学生"
+          :options="allStudentOptions"
+          style="flex: 1"
+          show-search
+          option-filter-prop="label"
+        />
+        <a-button type="primary" :disabled="!selectedStudentIds.length" @click="addMembers">
+          添加
+        </a-button>
+      </div>
+      <a-table
+        :data-source="members"
+        :columns="memberColumns"
+        row-key="id"
+        size="small"
+        :pagination="false"
+        style="margin-top: 12px"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'name'">
+            <div class="member-name-cell">
+              <a-avatar :size="24" :src="record.avatarPath || undefined">
+                {{ record.avatarPath ? '' : record.name.charAt(0) }}
+              </a-avatar>
+              <span>{{ record.name }}</span>
+            </div>
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-button type="link" size="small" danger @click="removeMember(record.id)">
+              移除
+            </a-button>
+          </template>
+        </template>
+      </a-table>
+    </a-modal>
+  </div>
+</template>
+
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
-  BankOutlined,
   PlusOutlined,
+  ReloadOutlined,
   EditOutlined,
   DeleteOutlined,
-  ReloadOutlined,
-  TeamOutlined,
-  ClockCircleOutlined
+  TeamOutlined
 } from '@ant-design/icons-vue'
-import { call } from '@renderer/api'
 import dayjs from 'dayjs'
-import type { ClassInfo, ClassType, Student } from '@shared/types'
+import { call } from '@renderer/api'
 import { subscribeRefresh, subscribeNewItem } from '@renderer/composables/useShortcuts'
+import type { ClassInfo, ClassInput, ClassType, Student } from '@shared/types'
 
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+const classTypeText: Record<ClassType, string> = {
+  regular: '常规',
+  training: '集训',
+  temp: '试听'
+}
+const classTypeColor: Record<ClassType, string> = {
+  regular: 'blue',
+  training: 'orange',
+  temp: 'green'
+}
+
+// 星期选项：0=周日 ... 6=周六（与 ScheduleRule.weekday 一致）
+const WEEKDAY_OPTIONS = [
+  { value: 1, label: '周一' },
+  { value: 2, label: '周二' },
+  { value: 3, label: '周三' },
+  { value: 4, label: '周四' },
+  { value: 5, label: '周五' },
+  { value: 6, label: '周六' },
+  { value: 0, label: '周日' }
+]
+const WEEKDAY_TEXT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
 const classes = ref<ClassInfo[]>([])
 const loading = ref(false)
 const keyword = ref('')
 
-const filteredClasses = computed(() => {
-  const kw = keyword.value.trim()
-  if (!kw) return classes.value
-  return classes.value.filter((c) => c.name.includes(kw))
-})
+const columns = [
+  { title: '班级名称', key: 'name' },
+  { title: '类型', key: 'type', width: 90 },
+  { title: '上课时间', key: 'schedule' },
+  { title: '人数', key: 'studentCount', width: 90 },
+  { title: '创建时间', key: 'createdAt', width: 160 },
+  { title: '操作', key: 'action', width: 240, fixed: 'right' as const }
+]
 
-function typeText(t: ClassType): string {
-  return t === 'training' ? '集训' : t === 'temp' ? '临时' : '常规'
-}
-function typeColor(t: ClassType): string {
-  return t === 'training' ? 'volcano' : t === 'temp' ? 'purple' : 'blue'
-}
-function weekdayText(w: number): string {
-  return WEEKDAYS[w] ?? '-'
-}
-
+// 新增/编辑表单
 const formVisible = ref(false)
 const submitting = ref(false)
 const editingId = ref<string | null>(null)
 const form = reactive<{
   name: string
   type: ClassType
-  scheduleWeekday: number | undefined
-  scheduleStart: dayjs.Dayjs | null
-  scheduleEnd: dayjs.Dayjs | null
-  scheduleSubject: string
+  weekday: number
+  startTime: string
+  endTime: string
+  subject: string
 }>({
   name: '',
   type: 'regular',
-  scheduleWeekday: undefined,
-  scheduleStart: null,
-  scheduleEnd: null,
-  scheduleSubject: ''
+  weekday: 1,
+  startTime: '09:00',
+  endTime: '10:30',
+  subject: ''
 })
 
+// 成员管理
 const membersVisible = ref(false)
-const membersLoading = ref(false)
-const currentClass = ref<ClassInfo | null>(null)
+const membersClassName = ref('')
+const currentClassId = ref<string | null>(null)
 const members = ref<Student[]>([])
-
-const addMemberVisible = ref(false)
-const candidateStudents = ref<Student[]>([])
+const allStudents = ref<Student[]>([])
 const selectedStudentIds = ref<string[]>([])
-const candidateColumns = [
-  { title: '姓名', dataIndex: 'name', key: 'name' },
-  { title: '年级', dataIndex: 'grade', key: 'grade' }
+
+const allStudentOptions = computed(() =>
+  allStudents.value.map((s) => ({ value: s.id, label: s.name }))
+)
+
+const memberColumns = [
+  { title: '学生', key: 'name' },
+  { title: '操作', key: 'action', width: 80 }
 ]
+
+function formatDate(d: string): string {
+  return d ? dayjs(d).format('YYYY-MM-DD HH:mm') : '-'
+}
+
+function formatSchedule(rule: ClassInfo['scheduleRule']): string {
+  if (!rule) return '-'
+  return `${WEEKDAY_TEXT[rule.weekday] ?? ''} ${rule.startTime}-${rule.endTime}${
+    rule.subject ? ' (' + rule.subject + ')' : ''
+  }`
+}
 
 async function loadClasses(): Promise<void> {
   loading.value = true
   try {
-    classes.value = await call(window.api.class.list())
+    classes.value = await call(
+      window.api.class.list({ keyword: keyword.value.trim() || undefined })
+    )
   } catch (e) {
-    message.error(`加载失败：${String(e instanceof Error ? e.message : e)}`)
+    message.error(String(e))
   } finally {
     loading.value = false
   }
 }
 
-function openCreate(): void {
-  editingId.value = null
+function resetForm(): void {
   form.name = ''
   form.type = 'regular'
-  form.scheduleWeekday = undefined
-  form.scheduleStart = null
-  form.scheduleEnd = null
-  form.scheduleSubject = ''
+  form.weekday = 1
+  form.startTime = '09:00'
+  form.endTime = '10:30'
+  form.subject = ''
+  editingId.value = null
+}
+
+function openCreate(): void {
+  resetForm()
   formVisible.value = true
 }
 
-function openEdit(c: ClassInfo): void {
-  editingId.value = c.id
-  form.name = c.name
-  form.type = c.type
-  form.scheduleWeekday = c.scheduleRule?.weekday
-  form.scheduleStart = c.scheduleRule?.startTime ? dayjs(c.scheduleRule.startTime, 'HH:mm') : null
-  form.scheduleEnd = c.scheduleRule?.endTime ? dayjs(c.scheduleRule.endTime, 'HH:mm') : null
-  form.scheduleSubject = c.scheduleRule?.subject ?? ''
+function openEdit(record: ClassInfo): void {
+  editingId.value = record.id
+  form.name = record.name
+  form.type = record.type
+  form.weekday = record.scheduleRule?.weekday ?? 1
+  form.startTime = record.scheduleRule?.startTime ?? '09:00'
+  form.endTime = record.scheduleRule?.endTime ?? '10:30'
+  form.subject = record.scheduleRule?.subject ?? ''
   formVisible.value = true
 }
 
-async function onSubmit(): Promise<void> {
+async function submitForm(): Promise<void> {
   if (!form.name.trim()) {
     message.warning('请输入班级名称')
     return
   }
+  const input: ClassInput = {
+    name: form.name.trim(),
+    type: form.type,
+    scheduleRule: {
+      weekday: form.weekday,
+      startTime: form.startTime,
+      endTime: form.endTime,
+      subject: form.subject.trim() || undefined
+    }
+  }
   submitting.value = true
   try {
-    const scheduleRule =
-      form.scheduleWeekday !== undefined && form.scheduleStart && form.scheduleEnd
-        ? {
-            weekday: form.scheduleWeekday,
-            startTime: form.scheduleStart.format('HH:mm'),
-            endTime: form.scheduleEnd.format('HH:mm'),
-            subject: form.scheduleSubject.trim() || undefined
-          }
-        : null
-    const input = { name: form.name.trim(), type: form.type, scheduleRule }
     if (editingId.value) {
       await call(window.api.class.update(editingId.value, input))
       message.success('已更新')
     } else {
       await call(window.api.class.create(input))
-      message.success('已新增班级')
+      message.success('已新增')
     }
     formVisible.value = false
     await loadClasses()
   } catch (e) {
-    message.error(`保存失败：${String(e instanceof Error ? e.message : e)}`)
+    message.error(String(e))
   } finally {
     submitting.value = false
   }
@@ -141,282 +343,83 @@ async function removeClass(id: string): Promise<void> {
     message.success('已删除')
     await loadClasses()
   } catch (e) {
-    message.error(`删除失败：${String(e instanceof Error ? e.message : e)}`)
+    message.error(String(e))
   }
 }
 
-async function openMembers(c: ClassInfo): Promise<void> {
-  currentClass.value = c
+async function openMembers(record: ClassInfo): Promise<void> {
+  currentClassId.value = record.id
+  membersClassName.value = record.name
+  selectedStudentIds.value = []
   membersVisible.value = true
-  await loadMembers(c.id)
-}
-
-async function loadMembers(classId: string): Promise<void> {
-  membersLoading.value = true
   try {
-    members.value = await call(window.api.class.members(classId))
+    const [mems, all] = await Promise.all([
+      call(window.api.class.members(record.id)),
+      call(window.api.student.list())
+    ])
+    members.value = mems
+    allStudents.value = all
   } catch (e) {
-    message.error(`加载成员失败：${String(e instanceof Error ? e.message : e)}`)
-  } finally {
-    membersLoading.value = false
+    message.error(String(e))
   }
 }
 
-async function openAddMember(): Promise<void> {
+async function addMembers(): Promise<void> {
+  if (!currentClassId.value || !selectedStudentIds.value.length) return
   try {
-    const all = await call(window.api.student.list())
-    const memberIds = new Set(members.value.map((m) => m.id))
-    candidateStudents.value = all.filter((s) => !memberIds.has(s.id))
+    await call(window.api.class.addMembers(currentClassId.value, selectedStudentIds.value))
+    message.success('已添加成员')
     selectedStudentIds.value = []
-    addMemberVisible.value = true
-  } catch (e) {
-    message.error(`加载学生列表失败：${String(e instanceof Error ? e.message : e)}`)
-  }
-}
-
-function onSelectChange(keys: string[]): void {
-  selectedStudentIds.value = keys
-}
-
-async function onAddMembers(): Promise<void> {
-  if (!currentClass.value || selectedStudentIds.value.length === 0) {
-    message.warning('请选择要添加的学生')
-    return
-  }
-  try {
-    await call(window.api.class.addMembers(currentClass.value.id, selectedStudentIds.value))
-    message.success(`已添加 ${selectedStudentIds.value.length} 名成员`)
-    addMemberVisible.value = false
-    await loadMembers(currentClass.value.id)
+    members.value = await call(window.api.class.members(currentClassId.value))
     await loadClasses()
   } catch (e) {
-    message.error(`添加失败：${String(e instanceof Error ? e.message : e)}`)
+    message.error(String(e))
   }
 }
 
 async function removeMember(studentId: string): Promise<void> {
-  if (!currentClass.value) return
+  if (!currentClassId.value) return
   try {
-    await call(window.api.class.removeMember(currentClass.value.id, studentId))
+    await call(window.api.class.removeMember(currentClassId.value, studentId))
     message.success('已移除')
-    await loadMembers(currentClass.value.id)
+    members.value = await call(window.api.class.members(currentClassId.value))
     await loadClasses()
   } catch (e) {
-    message.error(`移除失败：${String(e instanceof Error ? e.message : e)}`)
+    message.error(String(e))
   }
 }
 
+let offRefresh: (() => void) | null = null
+let offNewItem: (() => void) | null = null
 onMounted(() => {
   loadClasses()
-  subscribeRefresh(loadClasses)
-  subscribeNewItem(openCreate)
+  // 订阅全局刷新与新增事件
+  offRefresh = subscribeRefresh(loadClasses)
+  offNewItem = subscribeNewItem(openCreate, 'classes')
+})
+onUnmounted(() => {
+  offRefresh?.()
+  offRefresh = null
+  offNewItem?.()
+  offNewItem = null
 })
 </script>
-
-<template>
-  <div class="page-container">
-    <div class="section-title"><BankOutlined /> 班级管理</div>
-
-    <a-card :bordered="false">
-      <div class="toolbar">
-        <a-input-search
-          v-model:value="keyword"
-          placeholder="按名称搜索班级"
-          style="width: 260px"
-          allow-clear
-          @search="loadClasses"
-        />
-        <a-space>
-          <a-button @click="loadClasses"><ReloadOutlined /> 刷新</a-button>
-          <a-button type="primary" @click="openCreate"><PlusOutlined /> 新增班级</a-button>
-        </a-space>
-      </div>
-
-      <a-row :gutter="[16, 16]">
-        <a-col v-for="c in filteredClasses" :key="c.id" :xs="24" :sm="12" :md="8" :lg="6">
-          <a-card
-            hoverable
-            size="small"
-            :class="['class-card', `type-${c.type}`]"
-            @click="openMembers(c)"
-          >
-            <div class="class-name">
-              {{ c.name }}
-              <a-tag :color="typeColor(c.type)" style="margin-left: 4px">{{ typeText(c.type) }}</a-tag>
-            </div>
-            <div v-if="c.scheduleRule" class="class-schedule">
-              <ClockCircleOutlined />
-              {{ weekdayText(c.scheduleRule.weekday) }}
-              {{ c.scheduleRule.startTime }} - {{ c.scheduleRule.endTime }}
-            </div>
-            <div class="class-meta">
-              <TeamOutlined /> {{ c.studentCount ?? 0 }} 名学生
-            </div>
-            <div class="class-actions" @click.stop>
-              <a-button size="small" @click="openEdit(c)"><EditOutlined /></a-button>
-              <a-popconfirm title="确认删除该班级？" @confirm="removeClass(c.id)">
-                <a-button size="small" danger><DeleteOutlined /></a-button>
-              </a-popconfirm>
-            </div>
-          </a-card>
-        </a-col>
-      </a-row>
-      <a-empty v-if="filteredClasses.length === 0" description="暂无班级" />
-    </a-card>
-
-    <!-- 新增/编辑 Modal -->
-    <a-modal
-      v-model:open="formVisible"
-      :title="editingId ? '编辑班级' : '新增班级'"
-      :confirm-loading="submitting"
-      ok-text="保存"
-      cancel-text="取消"
-      @ok="onSubmit"
-    >
-      <a-form layout="vertical" :model="form">
-        <a-form-item label="班级名称" required>
-          <a-input v-model:value="form.name" placeholder="如：Scratch中阶-周三" />
-        </a-form-item>
-        <a-form-item label="班级类型">
-          <a-radio-group v-model:value="form.type">
-            <a-radio value="regular">常规班</a-radio>
-            <a-radio value="training">集训班</a-radio>
-            <a-radio value="temp">临时班</a-radio>
-          </a-radio-group>
-        </a-form-item>
-        <a-form-item label="排课规则">
-          <a-space wrap>
-            <a-select v-model:value="form.scheduleWeekday" style="width: 100px" placeholder="星期">
-              <a-select-option v-for="(w, i) in WEEKDAYS" :key="i" :value="i">{{ w }}</a-select-option>
-            </a-select>
-            <a-time-picker
-              v-model:value="form.scheduleStart"
-              format="HH:mm"
-              placeholder="开始"
-              style="width: 110px"
-            />
-            <a-time-picker
-              v-model:value="form.scheduleEnd"
-              format="HH:mm"
-              placeholder="结束"
-              style="width: 110px"
-            />
-          </a-space>
-        </a-form-item>
-        <a-form-item label="科目">
-          <a-input v-model:value="form.scheduleSubject" placeholder="如：Scratch中阶" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
-
-    <!-- 成员管理 Drawer -->
-    <a-drawer
-      v-model:open="membersVisible"
-      :title="`${currentClass?.name ?? ''} - 成员管理`"
-      width="520"
-    >
-      <div v-if="currentClass" class="members-section">
-        <div class="members-toolbar">
-          <span>共 {{ members.length }} 名成员</span>
-          <a-button type="primary" size="small" @click="openAddMember">
-            <PlusOutlined /> 添加成员
-          </a-button>
-        </div>
-        <a-list :data-source="members" :loading="membersLoading">
-          <template #renderItem="{ item }">
-            <a-list-item>
-              <a-list-item-meta
-                :title="item.name"
-                :description="item.grade || '未设置年级'"
-              >
-                <template #avatar>
-                  <a-avatar :src="item.avatarPath || undefined">
-                    {{ item.avatarPath ? '' : item.name.charAt(0) }}
-                  </a-avatar>
-                </template>
-              </a-list-item-meta>
-              <template #actions>
-                <a-tag v-for="t in item.tags" :key="t" color="blue">{{ t }}</a-tag>
-                <a-popconfirm title="确认移除该成员？" @confirm="removeMember(item.id)">
-                  <a-button size="small" danger>移除</a-button>
-                </a-popconfirm>
-              </template>
-            </a-list-item>
-          </template>
-        </a-list>
-      </div>
-    </a-drawer>
-
-    <!-- 添加成员 Modal -->
-    <a-modal
-      v-model:open="addMemberVisible"
-      title="添加成员到班级"
-      ok-text="添加"
-      cancel-text="取消"
-      @ok="onAddMembers"
-    >
-      <a-table
-        :data-source="candidateStudents"
-        :columns="candidateColumns"
-        :row-selection="{ selectedRowKeys: selectedStudentIds, onChange: onSelectChange }"
-        row-key="id"
-        size="small"
-        :pagination="false"
-      />
-    </a-modal>
-  </div>
-</template>
 
 <style scoped>
 .toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   margin-bottom: 16px;
-  flex-wrap: wrap;
-  gap: 12px;
 }
-.class-card {
-  position: relative;
-  transition: all 0.2s;
-}
-.class-card.type-training {
-  border-left: 3px solid #fa541c;
-}
-.class-card.type-temp {
-  border-left: 3px dashed #722ed1;
-}
-.class-name {
-  font-size: 15px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.class-schedule {
-  font-size: 12px;
-  color: #6b7280;
-  margin-bottom: 4px;
+.member-name-cell {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
-.class-meta {
-  font-size: 13px;
-  color: #4f46e5;
-}
-.class-actions {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+.members-add {
   display: flex;
-  gap: 4px;
-}
-.members-section {
-  padding: 0 4px;
-}
-.members-toolbar {
-  display: flex;
-  justify-content: space-between;
+  gap: 8px;
   align-items: center;
-  margin-bottom: 12px;
 }
 </style>

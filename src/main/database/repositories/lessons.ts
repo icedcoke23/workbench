@@ -14,17 +14,11 @@ interface LessonRow {
   created_at: string
 }
 
-function mapRow(
-  r: LessonRow,
-  className?: string,
-  ideaTitle?: string | null,
-  classType?: string
-): Lesson {
+function mapRow(r: LessonRow, className?: string, ideaTitle?: string | null): Lesson {
   return {
     id: r.id,
     classId: r.class_id,
     className,
-    classType: classType as Lesson['classType'],
     startTime: r.start_time,
     endTime: r.end_time,
     ideaVersionId: r.idea_version_id,
@@ -36,7 +30,7 @@ function mapRow(
 }
 
 export function list(q: { classId?: string; from?: string; to?: string }): Lesson[] {
-  let sql = `SELECT l.*, c.name as class_name, c.type as class_type, i.title as idea_title
+  let sql = `SELECT l.*, c.name as class_name, i.title as idea_title
              FROM lessons l
              LEFT JOIN classes c ON c.id = l.class_id
              LEFT JOIN idea_versions v ON v.id = l.idea_version_id
@@ -56,24 +50,22 @@ export function list(q: { classId?: string; from?: string; to?: string }): Lesso
     params.push(q.to)
   }
   sql += ` ORDER BY l.start_time ASC`
-  const rows = db().prepare(sql).all(...params) as Array<
-    LessonRow & { class_name?: string; class_type?: string; idea_title?: string }
-  >
-  return rows.map((r) => mapRow(r, r.class_name, r.idea_title ?? null, r.class_type))
+  const rows = db().prepare(sql).all(...params) as Array<LessonRow & { class_name?: string; idea_title?: string }>
+  return rows.map((r) => mapRow(r, r.class_name, r.idea_title ?? null))
 }
 
 export function get(id: string): Lesson | null {
   const row = db()
     .prepare(
-      `SELECT l.*, c.name as class_name, c.type as class_type, i.title as idea_title
+      `SELECT l.*, c.name as class_name, i.title as idea_title
        FROM lessons l
        LEFT JOIN classes c ON c.id = l.class_id
        LEFT JOIN idea_versions v ON v.id = l.idea_version_id
        LEFT JOIN ideas i ON i.id = v.idea_id
        WHERE l.id = ?`
     )
-    .get(id) as (LessonRow & { class_name?: string; class_type?: string; idea_title?: string }) | undefined
-  return row ? mapRow(row, row.class_name, row.idea_title ?? null, row.class_type) : null
+    .get(id) as (LessonRow & { class_name?: string; idea_title?: string }) | undefined
+  return row ? mapRow(row, row.class_name, row.idea_title ?? null) : null
 }
 
 export function create(input: LessonInput): Lesson {
@@ -157,14 +149,17 @@ export function score(action: ScoreAction): LessonRecord {
   const lesson = get(action.lessonId)
   if (!lesson) throw new Error('课次不存在')
   const id = uuid()
-  db()
-    .prepare(
-      `INSERT INTO lesson_records (id, lesson_id, student_id, score_change, participation_note)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(id, action.lessonId, action.studentId, action.scoreChange, action.note ?? null)
-  // 同步更新班级累计积分
-  classRepo.addScore(lesson.classId, action.studentId, action.scoreChange)
+  // 用事务包裹两条写入，保证课堂记录与累计积分一致
+  db().transaction(() => {
+    db()
+      .prepare(
+        `INSERT INTO lesson_records (id, lesson_id, student_id, score_change, participation_note)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(id, action.lessonId, action.studentId, action.scoreChange, action.note ?? null)
+    // 同步更新班级累计积分
+    classRepo.addScore(lesson.classId, action.studentId, action.scoreChange)
+  })()
   return records(action.lessonId).find((r) => r.id === id)!
 }
 

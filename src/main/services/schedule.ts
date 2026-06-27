@@ -60,7 +60,8 @@ export async function parseImage(imagePath: string): Promise<ScheduleParseResult
   return normalize(extractJSON(resp))
 }
 
-/** 将解析结果写入数据库：自动创建/复用班级、学生，并为本周生成课次 */
+/** 将解析结果写入数据库：自动创建/复用班级、学生，并为本周生成课次。
+ * 重复导入同一课表时，按 name+weekday+startTime 复用已有班级，避免重复创建。 */
 export function importResult(result: ScheduleParseResult): {
   classes: number
   students: number
@@ -69,25 +70,42 @@ export function importResult(result: ScheduleParseResult): {
   const existingStudents = new Map<string, string>() // name -> id
   for (const s of studentRepo.list()) existingStudents.set(s.name, s.id)
 
+  // 班级去重键：name|weekday|startTime
+  const existingClasses = new Map<string, string>() // key -> classId
+  for (const c of classRepo.list()) {
+    const rule = c.scheduleRule
+    if (rule && typeof rule.weekday === 'number' && rule.startTime) {
+      existingClasses.set(`${c.name}|${rule.weekday}|${rule.startTime}`, c.id)
+    }
+  }
+
   let classCount = 0
   let lessonCount = 0
   const newStudentNames = new Set<string>()
 
   for (const c of result.classes) {
-    // 创建班级
-    const cls = classRepo.create({
-      name: c.name,
-      type: 'regular',
-      scheduleRule: {
-        weekday: c.weekday,
-        startTime: c.startTime,
-        endTime: c.endTime,
-        subject: c.subject
-      }
-    })
-    classCount++
+    const key = `${c.name}|${c.weekday}|${c.startTime}`
+    let clsId = existingClasses.get(key)
+    let isNewClass = false
+    if (!clsId) {
+      // 创建新班级
+      const cls = classRepo.create({
+        name: c.name,
+        type: 'regular',
+        scheduleRule: {
+          weekday: c.weekday,
+          startTime: c.startTime,
+          endTime: c.endTime,
+          subject: c.subject
+        }
+      })
+      clsId = cls.id
+      existingClasses.set(key, clsId)
+      isNewClass = true
+      classCount++
+    }
 
-    // 学生入班
+    // 学生入班（已存在的班级也补充成员）
     const studentIds: string[] = []
     for (const name of c.students) {
       let sid = existingStudents.get(name)
@@ -99,24 +117,27 @@ export function importResult(result: ScheduleParseResult): {
       }
       studentIds.push(sid)
     }
-    if (studentIds.length) classRepo.addMembers(cls.id, studentIds)
+    if (studentIds.length) classRepo.addMembers(clsId, studentIds)
 
-    // 为本周生成一次课次
-    const lessonStart = nextWeekdayDate(c.weekday, c.startTime)
-    const lessonEnd = nextWeekdayDate(c.weekday, c.endTime)
-    lessonRepo.create({
-      classId: cls.id,
-      startTime: lessonStart,
-      endTime: lessonEnd,
-      subject: c.subject
-    })
-    lessonCount++
+    // 仅对新班级生成本周课次，避免重复导入产生重复课次
+    if (isNewClass) {
+      const lessonStart = nextWeekdayDate(c.weekday, c.startTime)
+      const lessonEnd = nextWeekdayDate(c.weekday, c.endTime)
+      lessonRepo.create({
+        classId: clsId,
+        startTime: lessonStart,
+        endTime: lessonEnd,
+        subject: c.subject
+      })
+      lessonCount++
+    }
   }
 
   return { classes: classCount, students: newStudentNames.size, lessons: lessonCount }
 }
 
-/** 计算本周（或下周）指定星期的时间 */
+/** 计算本周（或下周）指定星期的时间。
+ * 若目标日是今天且时间已过，则推到下周同一天，避免生成过去课次。 */
 function nextWeekdayDate(weekday: number, time: string): string {
   const now = new Date()
   const curDay = now.getDay()
@@ -124,7 +145,13 @@ function nextWeekdayDate(weekday: number, time: string): string {
   if (diff < 0) diff += 7
   const date = new Date(now)
   date.setDate(now.getDate() + diff)
-  const [h, m] = time.split(':').map(Number)
-  date.setHours(h || 0, m || 0, 0, 0)
+  const parts = time.split(':').map(Number)
+  const h = Number.isFinite(parts[0]) ? parts[0] : 0
+  const m = Number.isFinite(parts[1]) ? parts[1] : 0
+  date.setHours(h, m, 0, 0)
+  // 若是今天且时间已过，推到下周
+  if (diff === 0 && date.getTime() <= now.getTime()) {
+    date.setDate(date.getDate() + 7)
+  }
   return date.toISOString()
 }

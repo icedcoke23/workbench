@@ -20,7 +20,8 @@ export default tseslint.config(
       'src/renderer/env.d.ts',
       'src/renderer/global.d.ts',
       'src/shared/sql.d.ts',
-      'scripts/**'
+      'scripts/**',
+      'build/**'
     ]
   },
   // 基础 JS 推荐规则
@@ -121,9 +122,6 @@ export default tseslint.config(
         sourceType: 'module',
         extraFileExtensions: ['.vue']
       }
-    },
-    rules: {
-      'vue/block-order': ['warn', { order: ['script', 'template', 'style'] }]
     }
   },
 

@@ -43,16 +43,8 @@ function mapIdea(r: IdeaRow, versions: IdeaVersion[]): Idea {
   }
 }
 
-export function list(q?: { keyword?: string }): Idea[] {
-  let sql = `SELECT * FROM ideas WHERE 1=1`
-  const params: unknown[] = []
-  if (q?.keyword) {
-    sql += ` AND (title LIKE ? OR target_course LIKE ? OR description LIKE ?)`
-    const kw = `%${q.keyword}%`
-    params.push(kw, kw, kw)
-  }
-  sql += ` ORDER BY updated_at DESC`
-  const rows = db().prepare(sql).all(...params) as IdeaRow[]
+export function list(): Idea[] {
+  const rows = db().prepare(`SELECT * FROM ideas ORDER BY updated_at DESC`).all() as IdeaRow[]
   const vStmt = db().prepare(`SELECT * FROM idea_versions WHERE idea_id = ? ORDER BY created_at DESC`)
   return rows.map((r) => mapIdea(r, (vStmt.all(r.id) as VersionRow[]).map(mapVersion)))
 }

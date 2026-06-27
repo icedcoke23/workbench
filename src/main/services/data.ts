@@ -2,8 +2,9 @@ import { app, dialog } from 'electron'
 import { writeFileSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { db } from '../database/db'
+import { getLogger } from './logger'
 
-/** 需要导出的表清单（顺序尽量按依赖关系） */
+// 按依赖顺序列出所有需要导出/导入的表（被依赖方在前）
 const EXPORT_TABLES = [
   'students',
   'classes',
@@ -15,8 +16,8 @@ const EXPORT_TABLES = [
   'todos',
   'resources',
   'feedbacks',
-  'feedback_templates',
   'doc_links',
+  'feedback_templates',
   'settings',
   'sync_state'
 ] as const
@@ -25,15 +26,14 @@ interface ExportPayload {
   version: number
   exportedAt: string
   appVersion: string
-  tables: Record<string, unknown[]>
+  tables: Record<string, Record<string, unknown>[]>
 }
 
-/** 导出全部业务数据为 JSON 字符串 */
+/** 导出全部数据为 JSON 字符串 */
 export function exportAll(): string {
-  const conn = db()
-  const tables: Record<string, unknown[]> = {}
-  for (const t of EXPORT_TABLES) {
-    tables[t] = conn.prepare(`SELECT * FROM ${t}`).all() as unknown[]
+  const tables: Record<string, Record<string, unknown>[]> = {}
+  for (const table of EXPORT_TABLES) {
+    tables[table] = db().prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[]
   }
   const payload: ExportPayload = {
     version: 1,
@@ -41,76 +41,97 @@ export function exportAll(): string {
     appVersion: app.getVersion(),
     tables
   }
+  getLogger().info('data', '数据导出完成', { tables: EXPORT_TABLES.length })
   return JSON.stringify(payload, null, 2)
 }
 
-/** 将导出 JSON 写入用户选择的文件 */
-export async function saveExportToFile(json: string): Promise<string> {
-  const defaultName = `workbench-backup-${new Date().toISOString().slice(0, 10)}.json`
+/** 让用户选择保存位置并写入备份文件，返回保存路径或 null（用户取消） */
+export async function saveExportToFile(json: string): Promise<string | null> {
+  const fileName = `workbench-backup-${formatToday()}.json`
   const res = await dialog.showSaveDialog({
-    title: '选择备份文件保存位置',
-    defaultPath: defaultName,
-    filters: [{ name: 'JSON 备份文件', extensions: ['json'] }]
+    title: '导出数据备份',
+    defaultPath: join(app.getPath('documents'), fileName),
+    filters: [{ name: 'JSON', extensions: ['json'] }]
   })
-  if (res.canceled || !res.filePath) throw new Error('用户取消选择')
-  writeFileSync(res.filePath, json, 'utf-8')
+  if (res.canceled || !res.filePath) return null
+  writeFileSync(res.filePath, json, 'utf8')
+  getLogger().info('data', '备份文件已保存', { path: res.filePath })
   return res.filePath
 }
 
-/** 弹出文件选择对话框，让用户选择导入文件 */
+/** 让用户选择要导入的 JSON 文件，返回路径或 null（用户取消） */
 export async function pickImportFile(): Promise<string | null> {
   const res = await dialog.showOpenDialog({
-    title: '选择要导入的备份文件',
-    properties: ['openFile'],
-    filters: [{ name: 'JSON 备份文件', extensions: ['json'] }]
+    title: '选择备份文件',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    properties: ['openFile']
   })
   if (res.canceled || res.filePaths.length === 0) return null
   return res.filePaths[0]
 }
 
-/** 从备份文件导入数据（覆盖现有数据） */
+/**
+ * 从文件导入数据：在一个事务中按反向顺序清空表，再按正向顺序 INSERT OR REPLACE。
+ * 事务失败自动回滚。返回 { tables: 涉及表数, rows: 总行数 }
+ *
+ * 健壮性：
+ * - 仅清空/导入备份中实际包含的表（缺表的备份不会清空对应表）
+ * - 列名与目标表实际列取交集，防止备份文件含非法列名导致 SQL 解析失败
+ */
 export function importFromFile(filePath: string): { tables: number; rows: number } {
-  if (!existsSync(filePath)) throw new Error('文件不存在：' + filePath)
-  const raw = readFileSync(filePath, 'utf-8')
-  let payload: ExportPayload
-  try {
-    payload = JSON.parse(raw) as ExportPayload
-  } catch (e) {
-    throw new Error('文件解析失败：' + (e instanceof Error ? e.message : String(e)))
+  if (!existsSync(filePath)) {
+    throw new Error(`备份文件不存在: ${filePath}`)
   }
-  if (!payload.tables) throw new Error('备份文件格式不正确')
+  const raw = readFileSync(filePath, 'utf8')
+  const payload = JSON.parse(raw) as ExportPayload
+  const tables = payload.tables ?? {}
 
+  // 仅处理 EXPORT_TABLES 中存在且备份文件中也存在的表
+  const presentTables = EXPORT_TABLES.filter((t) => Array.isArray(tables[t]))
+
+  let tableCount = 0
+  let rowCount = 0
   const conn = db()
-  const tx = conn.transaction(() => {
-    // 先清空再导入（注意外键顺序：先删依赖方）
-    const deleteOrder = [...EXPORT_TABLES].reverse()
-    for (const t of deleteOrder) {
-      conn.exec(`DELETE FROM ${t}`)
-    }
-    let tables = 0
-    let rows = 0
-    for (const t of EXPORT_TABLES) {
-      const data = payload.tables[t]
-      if (!data || data.length === 0) continue
-      tables++
-      // 动态获取列名
-      const firstRow = data[0] as Record<string, unknown>
-      const cols = Object.keys(firstRow)
-      const placeholders = cols.map(() => '?').join(', ')
-      const sql = `INSERT INTO ${t} (${cols.join(', ')}) VALUES (${placeholders})`
-      const stmt = conn.prepare(sql)
-      for (const row of data) {
-        const r = row as Record<string, unknown>
-        stmt.run(...cols.map((c) => r[c]))
-        rows++
+  const importTx = conn.transaction(() => {
+    // 反向顺序清空（仅清空备份中包含的表，避免缺表备份导致数据丢失）
+    for (let i = EXPORT_TABLES.length - 1; i >= 0; i--) {
+      const t = EXPORT_TABLES[i]
+      if (presentTables.includes(t)) {
+        conn.prepare(`DELETE FROM ${t}`).run()
       }
     }
-    return { tables, rows }
+    // 正向顺序插入（先插被依赖方，再插依赖方）
+    for (const table of presentTables) {
+      const rows = tables[table]
+      if (!rows || rows.length === 0) continue
+      // 取目标表实际列名，与备份首行列名取交集，防止非法列名
+      const tableCols = (
+        conn.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+      ).map((c) => c.name)
+      const tableColsSet = new Set(tableCols)
+      const first = rows[0] as Record<string, unknown>
+      const cols = Object.keys(first).filter((c) => tableColsSet.has(c))
+      if (cols.length === 0) continue
+      const placeholders = cols.map(() => '?').join(', ')
+      const stmt = conn.prepare(
+        `INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`
+      )
+      for (const row of rows) {
+        const r = row as Record<string, unknown>
+        stmt.run(...cols.map((c) => r[c]))
+        rowCount++
+      }
+      tableCount++
+    }
   })
-  return tx()
+  importTx()
+  getLogger().info('data', '数据导入完成', { tables: tableCount, rows: rowCount })
+  return { tables: tableCount, rows: rowCount }
 }
 
-/** 获取默认导出目录路径（用于自动备份） */
-export function defaultExportDir(): string {
-  return join(app.getPath('userData'), 'backups')
+/** 生成 YYYYMMDD 格式日期字符串（用于备份文件名） */
+function formatToday(): string {
+  const d = new Date()
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
 }

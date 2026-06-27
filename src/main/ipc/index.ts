@@ -1,5 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { db, tryRun, tryRunAsync } from '../database/db'
+import type { Resource } from '@shared/types'
 import * as studentRepo from '../database/repositories/students'
 import * as classRepo from '../database/repositories/classes'
 import * as lessonRepo from '../database/repositories/lessons'
@@ -63,7 +64,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   )
 
   // ============ 点子库 ============
-  ipcMain.handle('idea:list', (_e, q) => tryRun(() => ideaRepo.list(q)))
+  ipcMain.handle('idea:list', () => tryRun(() => ideaRepo.list()))
   ipcMain.handle('idea:get', (_e, id) => tryRun(() => ideaRepo.get(id)))
   ipcMain.handle('idea:create', (_e, input) => tryRun(() => ideaRepo.create(input)))
   ipcMain.handle('idea:update', (_e, id, input) => tryRun(() => ideaRepo.update(id, input)))
@@ -168,38 +169,10 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   )
 
   // ============ 反馈模板 ============
-  ipcMain.handle('feedbackTemplate:list', (_e, q) =>
-    tryRun(() => feedbackTemplateRepo.list(q))
-  )
-  ipcMain.handle('feedbackTemplate:create', (_e, input) =>
-    tryRun(() => feedbackTemplateRepo.create(input))
-  )
-  ipcMain.handle('feedbackTemplate:update', (_e, id, input) =>
-    tryRun(() => feedbackTemplateRepo.update(id, input))
-  )
-  ipcMain.handle('feedbackTemplate:remove', (_e, id) =>
-    tryRun(() => feedbackTemplateRepo.remove(id))
-  )
-
-  // ============ 数据备份/导入/导出 ============
-  ipcMain.handle('data:export', () => tryRun(() => dataService.exportAll()))
-  ipcMain.handle('data:saveExportToFile', async (_e, json) =>
-    tryRunAsync(() => dataService.saveExportToFile(json))
-  )
-  ipcMain.handle('data:pickImportFile', async () =>
-    tryRunAsync(async () => {
-      const p = await dataService.pickImportFile()
-      return p
-    })
-  )
-  ipcMain.handle('data:importFromFile', async (_e, filePath) =>
-    tryRun(() => dataService.importFromFile(filePath))
-  )
-
-  // ============ 学生学习历史 ============
-  ipcMain.handle('studentHistory:get', (_e, studentId) =>
-    tryRun(() => historyService.getStudentHistory(studentId))
-  )
+  ipcMain.handle('feedbackTemplate:list', (_e, q) => tryRun(() => feedbackTemplateRepo.list(q)))
+  ipcMain.handle('feedbackTemplate:create', (_e, input) => tryRun(() => feedbackTemplateRepo.create(input)))
+  ipcMain.handle('feedbackTemplate:update', (_e, id, input) => tryRun(() => feedbackTemplateRepo.update(id, input)))
+  ipcMain.handle('feedbackTemplate:remove', (_e, id) => tryRun(() => feedbackTemplateRepo.remove(id)))
 
   // ============ AI 课表导入 ============
   ipcMain.handle('schedule:parseText', async (_e, text) =>
@@ -236,6 +209,19 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // ============ 仪表盘 ============
   ipcMain.handle('dashboard:get', () => tryRun(() => todoService.buildDashboard()))
 
+  // ============ 数据备份 ============
+  ipcMain.handle('data:export', () => tryRun(() => dataService.exportAll()))
+  ipcMain.handle('data:saveExportToFile', (_e, json) =>
+    tryRunAsync(async () => dataService.saveExportToFile(json))
+  )
+  ipcMain.handle('data:pickImportFile', async () => tryRunAsync(async () => dataService.pickImportFile()))
+  ipcMain.handle('data:importFromFile', (_e, filePath) =>
+    tryRunAsync(async () => dataService.importFromFile(filePath))
+  )
+
+  // ============ 学生学习历史 ============
+  ipcMain.handle('studentHistory:get', (_e, studentId) => tryRun(() => historyService.getStudentHistory(studentId)))
+
   // ============ Scratch ============
   ipcMain.handle('scratch:launch', async (_e, versionId) =>
     tryRunAsync(() => scratchService.launch(versionId))
@@ -246,6 +232,17 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   )
   ipcMain.handle('scratch:saveToResource', async (_e, payload) =>
     tryRunAsync(() => scratchService.saveToResource(payload))
+  )
+  ipcMain.handle('scratch:pickResourceFile', async () =>
+    tryRunAsync(async () => {
+      const p = await fileService.pickResourceFile()
+      if (!p) throw new Error('取消选择')
+      // 按扩展名推断类型，导入并创建资源记录
+      const ext = p.toLowerCase().split('.').pop() || ''
+      const type: Resource['type'] = ext === 'wav' || ext === 'mp3' ? 'sound' : 'sprite'
+      const { name, filePath } = await fileService.importResourceFile(p, type)
+      return resourceRepo.create({ name, type, filePath, tags: [] })
+    })
   )
 
   // ============ 文档中心 ============

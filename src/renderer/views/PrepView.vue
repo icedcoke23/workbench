@@ -1,3 +1,345 @@
+<template>
+  <div class="page-container">
+    <a-tabs v-model:activeKey="activeTab" class="prep-tabs">
+      <!-- ============ 点子库 ============ -->
+      <a-tab-pane key="ideas">
+        <template #tab>
+          <span><BulbOutlined /> 点子库</span>
+        </template>
+
+        <div class="tab-toolbar">
+          <span class="section-title">点子库</span>
+          <a-space>
+            <a-button @click="loadIdeas"><ReloadOutlined /> 刷新</a-button>
+            <a-button type="primary" @click="openNewIdeaModal"><PlusOutlined /> 新建点子</a-button>
+          </a-space>
+        </div>
+
+        <a-list
+          :data-source="ideas"
+          :loading="ideasLoading"
+          :locale="{ emptyText: '暂无点子，点击「新建点子」开始记录灵感' }"
+        >
+          <template #renderItem="{ item }">
+            <a-card class="idea-card" size="small">
+              <template #title>
+                <div class="idea-title">
+                  <span class="idea-name">{{ item.title }}</span>
+                  <a-space :size="6">
+                    <a-tag v-if="item.targetCourse" color="blue">{{ item.targetCourse }}</a-tag>
+                    <a-tag :color="ideaStatusColor[item.status]">{{ ideaStatusText[item.status] }}</a-tag>
+                  </a-space>
+                </div>
+              </template>
+              <template #extra>
+                <a-space :size="6">
+                  <a-button size="small" @click="openNewVersionModal(item)">
+                    <PlusCircleOutlined /> 新建版本
+                  </a-button>
+                  <a-popconfirm title="确认删除该点子？相关版本也将删除。" @confirm="removeIdea(item.id)">
+                    <a-button size="small" danger><DeleteOutlined /></a-button>
+                  </a-popconfirm>
+                </a-space>
+              </template>
+
+              <p v-if="item.description" class="idea-desc">{{ item.description }}</p>
+              <p v-else class="idea-desc idea-desc-empty">暂无描述</p>
+
+              <div class="idea-meta">
+                <span>创建于 {{ formatDate(item.createdAt) }}</span>
+                <span>更新于 {{ formatDate(item.updatedAt) }}</span>
+              </div>
+
+              <div class="version-toggle">
+                <a-button type="link" size="small" @click="toggleVersions(item.id)">
+                  {{ expandedMap[item.id] ? '收起版本' : '展开版本' }}（{{ item.versions?.length || 0 }}）
+                </a-button>
+              </div>
+
+              <div v-if="expandedMap[item.id]" class="version-list">
+                <a-empty
+                  v-if="!item.versions || item.versions.length === 0"
+                  description="暂无版本，点击「新建版本」归档你的 Scratch 作品"
+                  :image="undefined"
+                />
+                <a-list v-else :data-source="item.versions" size="small">
+                  <template #renderItem="{ item: ver }">
+                    <a-list-item>
+                      <a-list-item-meta>
+                        <template #title>
+                          <span class="ver-name">{{ ver.versionName }}</span>
+                        </template>
+                        <template #description>
+                          <div class="ver-notes">{{ ver.notes || '无备注' }}</div>
+                          <div class="ver-date">{{ formatDate(ver.createdAt) }}</div>
+                        </template>
+                      </a-list-item-meta>
+                      <template #actions>
+                        <a-button type="primary" size="small" @click="launchVersion(ver.id)">
+                          <PlayCircleOutlined /> 开始创作
+                        </a-button>
+                        <a-popconfirm title="确认删除该版本？" @confirm="removeVersion(ver.id)">
+                          <a-button size="small" danger><DeleteOutlined /></a-button>
+                        </a-popconfirm>
+                      </template>
+                    </a-list-item>
+                  </template>
+                </a-list>
+              </div>
+            </a-card>
+          </template>
+        </a-list>
+      </a-tab-pane>
+
+      <!-- ============ 资源库 ============ -->
+      <a-tab-pane key="resources">
+        <template #tab>
+          <span><AppstoreOutlined /> 资源库</span>
+        </template>
+
+        <div class="tab-toolbar">
+          <span class="section-title">资源库</span>
+          <a-space>
+            <a-button @click="loadResources"><ReloadOutlined /> 刷新</a-button>
+            <a-button type="primary" @click="importResource"><ImportOutlined /> 导入素材</a-button>
+          </a-space>
+        </div>
+
+        <div class="filter-row">
+          <a-select
+            v-model:value="resourceFilter.type"
+            style="width: 140px"
+            @change="loadResources"
+          >
+            <a-select-option value="">全部类型</a-select-option>
+            <a-select-option value="backdrop">背景</a-select-option>
+            <a-select-option value="sprite">角色</a-select-option>
+            <a-select-option value="sound">音效</a-select-option>
+          </a-select>
+          <a-select
+            v-model:value="resourceFilter.tag"
+            style="width: 180px"
+            placeholder="按标签筛选"
+            allow-clear
+            show-search
+            :options="tagOptions"
+            @change="loadResources"
+          />
+          <a-input-search
+            v-model:value="resourceFilter.keyword"
+            placeholder="按名称搜索素材"
+            style="width: 260px"
+            allow-clear
+            @search="loadResources"
+          />
+        </div>
+
+        <a-table
+          :data-source="resources"
+          :columns="resourceColumns"
+          :loading="resourcesLoading"
+          row-key="id"
+          :pagination="{ pageSize: 8, size: 'small' }"
+          size="small"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'type'">
+              <a-tag :color="resourceTypeColor[record.type as ResourceType]">
+                {{ resourceTypeText[record.type as ResourceType] }}
+              </a-tag>
+            </template>
+            <template v-else-if="column.key === 'tags'">
+              <template v-if="record.tags && record.tags.length">
+                <a-tag v-for="t in record.tags" :key="t">{{ t }}</a-tag>
+              </template>
+              <span v-else class="text-muted">-</span>
+            </template>
+            <template v-else-if="column.key === 'createdAt'">
+              {{ formatDate(record.createdAt) }}
+            </template>
+            <template v-else-if="column.key === 'action'">
+              <a-space :size="6">
+                <a-button size="small" @click="openEditResourceModal(record)">
+                  <EditOutlined /> 编辑
+                </a-button>
+                <a-popconfirm title="确认删除该素材？" @confirm="removeResource(record.id)">
+                  <a-button size="small" danger><DeleteOutlined /></a-button>
+                </a-popconfirm>
+              </a-space>
+            </template>
+          </template>
+        </a-table>
+      </a-tab-pane>
+
+      <!-- ============ 文档中心 ============ -->
+      <a-tab-pane key="docs">
+        <template #tab>
+          <span><FileTextOutlined /> 文档中心</span>
+        </template>
+
+        <span class="section-title">文档中心</span>
+
+        <a-card class="docs-card" size="small">
+          <a-alert
+            class="docs-alert"
+            type="info"
+            show-icon
+            message="Webview 嵌入语雀需登录，建议用浏览器打开"
+            description="语雀文档在应用内嵌 Webview 中通常需要额外登录态，体验受限。如遇无法查看，请使用「在浏览器打开」按钮在外部浏览器中阅读。"
+          />
+
+          <a-form layout="vertical" class="docs-form">
+            <a-form-item label="语雀文档 URL">
+              <a-input
+                v-model:value="docForm.url"
+                placeholder="https://www.yuque.com/..."
+                allow-clear
+              />
+            </a-form-item>
+            <a-form-item label="文档标题">
+              <a-input v-model:value="docForm.title" placeholder="为该文档起一个标题" allow-clear />
+            </a-form-item>
+            <a-form-item label="关联课次">
+              <a-select
+                v-model:value="docForm.lessonId"
+                placeholder="选择要关联的课次"
+                :loading="lessonsLoading"
+                :options="lessonOptions"
+                show-search
+                option-filter-prop="label"
+                allow-clear
+              />
+            </a-form-item>
+            <a-space>
+              <a-button
+                type="primary"
+                :disabled="!canLinkDoc"
+                @click="linkDoc"
+              >
+                <LinkOutlined /> 关联到课次
+              </a-button>
+              <a-button :disabled="!docForm.url" @click="openDocInBrowser">
+                <GlobalOutlined /> 在浏览器打开
+              </a-button>
+            </a-space>
+          </a-form>
+        </a-card>
+      </a-tab-pane>
+    </a-tabs>
+
+    <!-- ============ 新建点子 Modal ============ -->
+    <a-modal
+      v-model:open="newIdeaModalVisible"
+      title="新建点子"
+      :confirm-loading="newIdeaSubmitting"
+      @ok="submitNewIdea"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="标题" required>
+          <a-input v-model:value="newIdeaForm.title" placeholder="一句话描述你的灵感" />
+        </a-form-item>
+        <a-form-item label="目标课程">
+          <a-input v-model:value="newIdeaForm.targetCourse" placeholder="如：Scratch 入门、Python 进阶" />
+        </a-form-item>
+        <a-form-item label="描述">
+          <a-textarea v-model:value="newIdeaForm.description" :rows="3" placeholder="详细描述点子内容、教学目标等" />
+        </a-form-item>
+        <a-form-item label="状态">
+          <a-select v-model:value="newIdeaForm.status">
+            <a-select-option value="idea">点子</a-select-option>
+            <a-select-option value="developing">开发中</a-select-option>
+            <a-select-option value="archived">已归档</a-select-option>
+          </a-select>
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <!-- ============ 新建版本 Modal ============ -->
+    <a-modal
+      v-model:open="newVersionModalVisible"
+      :title="`新建版本 - ${newVersionIdeaTitle}`"
+      :confirm-loading="newVersionSubmitting"
+      @ok="submitNewVersion"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="版本名称" required>
+          <a-input v-model:value="newVersionForm.versionName" placeholder="如 v1.0" />
+        </a-form-item>
+        <a-form-item label="备注">
+          <a-textarea v-model:value="newVersionForm.notes" :rows="3" placeholder="本次版本的改动说明（可选）" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <!-- ============ Scratch 保存归档 Modal ============ -->
+    <a-modal
+      v-model:open="saveModalVisible"
+      title="保存到"
+      :confirm-loading="saveSubmitting"
+      :ok-text="saveTarget === 'idea' ? '保存到点子库' : '保存到资源库'"
+      @ok="submitSave"
+    >
+      <a-radio-group v-model:value="saveTarget" class="save-radio">
+        <a-radio value="idea">保存到点子库（作为某点子的新版本）</a-radio>
+        <a-radio value="resource">保存到资源库（作为可复用素材）</a-radio>
+      </a-radio-group>
+
+      <div v-if="saveTarget === 'idea'" class="save-idea-form">
+        <a-form layout="vertical">
+          <a-form-item label="所属点子" required>
+            <a-select
+              v-model:value="saveForm.ideaId"
+              placeholder="选择目标点子"
+              :loading="saveIdeasLoading"
+              :options="ideaSelectOptions"
+              show-search
+              option-filter-prop="label"
+            />
+          </a-form-item>
+          <a-form-item label="版本名称" required>
+            <a-input v-model:value="saveForm.versionName" placeholder="如 v1.0" />
+          </a-form-item>
+          <a-form-item label="备注">
+            <a-textarea v-model:value="saveForm.notes" :rows="3" placeholder="版本备注（可选）" />
+          </a-form-item>
+        </a-form>
+      </div>
+      <div v-else class="save-resource-tip">
+        <a-alert
+          type="info"
+          show-icon
+          message="将作为通用素材保存到资源库，可在「资源库」标签页中管理。"
+        />
+      </div>
+    </a-modal>
+
+    <!-- ============ 编辑资源 Modal（标签 + 名称） ============ -->
+    <a-modal
+      v-model:open="editResourceModalVisible"
+      title="编辑素材"
+      :confirm-loading="editResourceSubmitting"
+      @ok="submitEditResource"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="名称" required>
+          <a-input v-model:value="editResourceForm.name" placeholder="素材名称" />
+        </a-form-item>
+        <a-form-item label="标签">
+          <a-select
+            v-model:value="editResourceForm.tags"
+            mode="tags"
+            placeholder="输入标签后回车添加，可选择已有标签"
+            :options="tagOptions"
+            :token-separators="[',']"
+            allow-clear
+          />
+          <div class="tag-tip">提示：输入文本后按回车或逗号添加标签，已使用的标签会自动出现在候选项中。</div>
+        </a-form-item>
+      </a-form>
+    </a-modal>
+  </div>
+</template>
+
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import {
@@ -12,12 +354,12 @@ import {
   PlayCircleOutlined,
   LinkOutlined,
   GlobalOutlined,
-  EyeOutlined,
-  CloseOutlined
+  EditOutlined
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { call } from '@renderer/api'
+import { subscribeRefresh, subscribeNewItem } from '@renderer/composables/useShortcuts'
 import type {
   Idea,
   IdeaStatus,
@@ -26,7 +368,6 @@ import type {
   Lesson,
   ScratchSavePayload
 } from '@shared/types'
-import { subscribeRefresh, subscribeNewItem } from '@renderer/composables/useShortcuts'
 
 // ============ 公共 ============
 const activeTab = ref<'ideas' | 'resources' | 'docs'>('ideas')
@@ -193,11 +534,10 @@ async function submitNewVersion(): Promise<void> {
 // ============ 资源库 ============
 const resources = ref<Resource[]>([])
 const resourcesLoading = ref(false)
-const resourceTags = ref<string[]>([])
-const resourceFilter = reactive<{ type: string; keyword: string; tag: string }>({
+const resourceFilter = reactive<{ type: string; keyword: string; tag: string | undefined }>({
   type: '',
   keyword: '',
-  tag: ''
+  tag: undefined
 })
 
 const resourceColumns = [
@@ -205,24 +545,31 @@ const resourceColumns = [
   { title: '类型', dataIndex: 'type', key: 'type', width: 100 },
   { title: '标签', dataIndex: 'tags', key: 'tags' },
   { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 160 },
-  { title: '操作', key: 'action', width: 110 }
+  { title: '操作', key: 'action', width: 180 }
 ]
+
+// 全部可用标签（用于筛选下拉与编辑时的可选项）
+const allTags = ref<string[]>([])
+const tagOptions = computed(() => allTags.value.map((t) => ({ value: t, label: t })))
+
+async function loadAllTags(): Promise<void> {
+  try {
+    allTags.value = await call(window.api.resource.allTags())
+  } catch {
+    // 忽略错误，保留旧值
+  }
+}
 
 async function loadResources(): Promise<void> {
   resourcesLoading.value = true
   try {
-    const [list, tags] = await Promise.all([
-      call(
-        window.api.resource.list({
-          type: resourceFilter.type || undefined,
-          keyword: resourceFilter.keyword.trim() || undefined,
-          tag: resourceFilter.tag || undefined
-        })
-      ),
-      call(window.api.resource.allTags())
-    ])
-    resources.value = list
-    resourceTags.value = tags
+    resources.value = await call(
+      window.api.resource.list({
+        type: resourceFilter.type || undefined,
+        keyword: resourceFilter.keyword.trim() || undefined,
+        tag: resourceFilter.tag || undefined
+      })
+    )
   } catch (e) {
     message.error(`加载素材失败：${String(e instanceof Error ? e.message : e)}`)
   } finally {
@@ -235,6 +582,7 @@ async function importResource(): Promise<void> {
     const res = await call(window.api.scratch.pickResourceFile())
     message.success(`已导入素材：${res.name}`)
     await loadResources()
+    await loadAllTags()
   } catch (e) {
     message.error(`导入失败：${String(e instanceof Error ? e.message : e)}`)
   }
@@ -245,8 +593,51 @@ async function removeResource(id: string): Promise<void> {
     await call(window.api.resource.remove(id))
     message.success('已删除素材')
     await loadResources()
+    await loadAllTags()
   } catch (e) {
     message.error(`删除失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
+// 资源编辑（标签 + 名称）
+const editResourceModalVisible = ref(false)
+const editResourceSubmitting = ref(false)
+const editResourceForm = reactive<{ id: string; name: string; tags: string[] }>({
+  id: '',
+  name: '',
+  tags: []
+})
+
+function openEditResourceModal(record: Resource): void {
+  editResourceForm.id = record.id
+  editResourceForm.name = record.name
+  editResourceForm.tags = [...(record.tags || [])]
+  editResourceModalVisible.value = true
+}
+
+async function submitEditResource(): Promise<void> {
+  const name = editResourceForm.name.trim()
+  if (!name) {
+    message.warning('请输入名称')
+    return
+  }
+  // 清理标签：去空白、去重
+  const tags = Array.from(
+    new Set(editResourceForm.tags.map((t) => t.trim()).filter(Boolean))
+  )
+  editResourceSubmitting.value = true
+  try {
+    await call(
+      window.api.resource.update(editResourceForm.id, { name, tags })
+    )
+    message.success('已更新')
+    editResourceModalVisible.value = false
+    await loadResources()
+    await loadAllTags()
+  } catch (e) {
+    message.error(`更新失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    editResourceSubmitting.value = false
   }
 }
 
@@ -258,22 +649,6 @@ const docForm = reactive<{ url: string; title: string; lessonId: string | undefi
   title: '',
   lessonId: undefined
 })
-
-// 文档嵌入预览
-const embeddedDocUrl = ref('')
-const embeddedDocTitle = ref('')
-const webviewUserAgent =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-
-function embedDoc(): void {
-  if (!docForm.url) return
-  embeddedDocUrl.value = docForm.url
-  embeddedDocTitle.value = docForm.title || docForm.url
-}
-function closeEmbed(): void {
-  embeddedDocUrl.value = ''
-  embeddedDocTitle.value = ''
-}
 
 const lessonOptions = computed(() =>
   lessons.value.map((l) => ({
@@ -411,12 +786,14 @@ async function submitSave(): Promise<void> {
 type SaveHandler = (payload: ScratchSavePayload) => void
 type SubscribeSave = (handler: SaveHandler) => () => void
 let offScratchSave: (() => void) | null = null
+// 全局刷新与新增项订阅取消函数
 let offRefresh: (() => void) | null = null
 let offNewItem: (() => void) | null = null
 
 onMounted(() => {
   loadIdeas()
   loadResources()
+  loadAllTags()
   loadLessons()
 
   const subscribe = window.events['scratch:save-request'] as unknown as SubscribeSave
@@ -424,13 +801,15 @@ onMounted(() => {
     handleScratchSave(payload)
   })
 
-  // 快捷键订阅
+  // 订阅全局刷新事件：刷新时重新加载点子库、资源库、标签、课次
   offRefresh = subscribeRefresh(() => {
     loadIdeas()
     loadResources()
+    loadAllTags()
     loadLessons()
   })
-  offNewItem = subscribeNewItem(openNewIdeaModal)
+  // 订阅全局新增事件：触发新建点子弹窗
+  offNewItem = subscribeNewItem(openNewIdeaModal, 'prep')
 })
 
 onUnmounted(() => {
@@ -442,339 +821,6 @@ onUnmounted(() => {
   offNewItem = null
 })
 </script>
-
-<template>
-  <div class="page-container">
-    <a-tabs v-model:activeKey="activeTab" class="prep-tabs">
-      <!-- ============ 点子库 ============ -->
-      <a-tab-pane key="ideas">
-        <template #tab>
-          <span><BulbOutlined /> 点子库</span>
-        </template>
-
-        <div class="tab-toolbar">
-          <span class="section-title">点子库</span>
-          <a-space>
-            <a-button @click="loadIdeas"><ReloadOutlined /> 刷新</a-button>
-            <a-button type="primary" @click="openNewIdeaModal"><PlusOutlined /> 新建点子</a-button>
-          </a-space>
-        </div>
-
-        <a-list
-          :data-source="ideas"
-          :loading="ideasLoading"
-          :locale="{ emptyText: '暂无点子，点击「新建点子」开始记录灵感' }"
-        >
-          <template #renderItem="{ item }">
-            <a-card class="idea-card" size="small">
-              <template #title>
-                <div class="idea-title">
-                  <span class="idea-name">{{ item.title }}</span>
-                  <a-space :size="6">
-                    <a-tag v-if="item.targetCourse" color="blue">{{ item.targetCourse }}</a-tag>
-                    <a-tag :color="ideaStatusColor[item.status]">{{ ideaStatusText[item.status] }}</a-tag>
-                  </a-space>
-                </div>
-              </template>
-              <template #extra>
-                <a-space :size="6">
-                  <a-button size="small" @click="openNewVersionModal(item)">
-                    <PlusCircleOutlined /> 新建版本
-                  </a-button>
-                  <a-popconfirm title="确认删除该点子？相关版本也将删除。" @confirm="removeIdea(item.id)">
-                    <a-button size="small" danger><DeleteOutlined /></a-button>
-                  </a-popconfirm>
-                </a-space>
-              </template>
-
-              <p v-if="item.description" class="idea-desc">{{ item.description }}</p>
-              <p v-else class="idea-desc idea-desc-empty">暂无描述</p>
-
-              <div class="idea-meta">
-                <span>创建于 {{ formatDate(item.createdAt) }}</span>
-                <span>更新于 {{ formatDate(item.updatedAt) }}</span>
-              </div>
-
-              <div class="version-toggle">
-                <a-button type="link" size="small" @click="toggleVersions(item.id)">
-                  {{ expandedMap[item.id] ? '收起版本' : '展开版本' }}（{{ item.versions?.length || 0 }}）
-                </a-button>
-              </div>
-
-              <div v-if="expandedMap[item.id]" class="version-list">
-                <a-empty
-                  v-if="!item.versions || item.versions.length === 0"
-                  description="暂无版本，点击「新建版本」归档你的 Scratch 作品"
-                  :image="undefined"
-                />
-                <a-list v-else :data-source="item.versions" size="small">
-                  <template #renderItem="{ item: ver }">
-                    <a-list-item>
-                      <a-list-item-meta>
-                        <template #title>
-                          <span class="ver-name">{{ ver.versionName }}</span>
-                        </template>
-                        <template #description>
-                          <div class="ver-notes">{{ ver.notes || '无备注' }}</div>
-                          <div class="ver-date">{{ formatDate(ver.createdAt) }}</div>
-                        </template>
-                      </a-list-item-meta>
-                      <template #actions>
-                        <a-button type="primary" size="small" @click="launchVersion(ver.id)">
-                          <PlayCircleOutlined /> 开始创作
-                        </a-button>
-                        <a-popconfirm title="确认删除该版本？" @confirm="removeVersion(ver.id)">
-                          <a-button size="small" danger><DeleteOutlined /></a-button>
-                        </a-popconfirm>
-                      </template>
-                    </a-list-item>
-                  </template>
-                </a-list>
-              </div>
-            </a-card>
-          </template>
-        </a-list>
-      </a-tab-pane>
-
-      <!-- ============ 资源库 ============ -->
-      <a-tab-pane key="resources">
-        <template #tab>
-          <span><AppstoreOutlined /> 资源库</span>
-        </template>
-
-        <div class="tab-toolbar">
-          <span class="section-title">资源库</span>
-          <a-space>
-            <a-button @click="loadResources"><ReloadOutlined /> 刷新</a-button>
-            <a-button type="primary" @click="importResource"><ImportOutlined /> 导入素材</a-button>
-          </a-space>
-        </div>
-
-        <div class="filter-row">
-          <a-select
-            v-model:value="resourceFilter.type"
-            style="width: 140px"
-            @change="loadResources"
-          >
-            <a-select-option value="">全部类型</a-select-option>
-            <a-select-option value="backdrop">背景</a-select-option>
-            <a-select-option value="sprite">角色</a-select-option>
-            <a-select-option value="sound">音效</a-select-option>
-          </a-select>
-          <a-select
-            v-model:value="resourceFilter.tag"
-            style="width: 160px"
-            placeholder="全部标签"
-            allow-clear
-            @change="loadResources"
-          >
-            <a-select-option v-for="t in resourceTags" :key="t" :value="t">
-              {{ t }}
-            </a-select-option>
-          </a-select>
-          <a-input-search
-            v-model:value="resourceFilter.keyword"
-            placeholder="按名称搜索素材"
-            style="width: 260px"
-            allow-clear
-            @search="loadResources"
-          />
-        </div>
-
-        <a-table
-          :data-source="resources"
-          :columns="resourceColumns"
-          :loading="resourcesLoading"
-          row-key="id"
-          :pagination="{ pageSize: 8, size: 'small' }"
-          size="small"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'type'">
-              <a-tag :color="resourceTypeColor[record.type as ResourceType]">
-                {{ resourceTypeText[record.type as ResourceType] }}
-              </a-tag>
-            </template>
-            <template v-else-if="column.key === 'tags'">
-              <template v-if="record.tags && record.tags.length">
-                <a-tag v-for="t in record.tags" :key="t">{{ t }}</a-tag>
-              </template>
-              <span v-else class="text-muted">-</span>
-            </template>
-            <template v-else-if="column.key === 'createdAt'">
-              {{ formatDate(record.createdAt) }}
-            </template>
-            <template v-else-if="column.key === 'action'">
-              <a-popconfirm title="确认删除该素材？" @confirm="removeResource(record.id)">
-                <a-button size="small" danger><DeleteOutlined /> 删除</a-button>
-              </a-popconfirm>
-            </template>
-          </template>
-        </a-table>
-      </a-tab-pane>
-
-      <!-- ============ 文档中心 ============ -->
-      <a-tab-pane key="docs">
-        <template #tab>
-          <span><FileTextOutlined /> 文档中心</span>
-        </template>
-
-        <span class="section-title">文档中心</span>
-
-        <a-card class="docs-card" size="small">
-          <a-alert
-            class="docs-alert"
-            type="info"
-            show-icon
-            message="应用内嵌入语雀文档预览"
-            description="在 URL 中粘贴语雀文档地址，点击「嵌入预览」即可在应用内查看。首次使用需在 webview 中登录语雀账号。如遇登录受限，可使用「在浏览器打开」。"
-          />
-
-          <a-form layout="vertical" class="docs-form">
-            <a-form-item label="语雀文档 URL">
-              <a-input
-                v-model:value="docForm.url"
-                placeholder="https://www.yuque.com/..."
-                allow-clear
-              />
-            </a-form-item>
-            <a-form-item label="文档标题">
-              <a-input v-model:value="docForm.title" placeholder="为该文档起一个标题" allow-clear />
-            </a-form-item>
-            <a-form-item label="关联课次">
-              <a-select
-                v-model:value="docForm.lessonId"
-                placeholder="选择要关联的课次"
-                :loading="lessonsLoading"
-                :options="lessonOptions"
-                show-search
-                option-filter-prop="label"
-                allow-clear
-              />
-            </a-form-item>
-            <a-space>
-              <a-button
-                type="primary"
-                :disabled="!canLinkDoc"
-                @click="linkDoc"
-              >
-                <LinkOutlined /> 关联到课次
-              </a-button>
-              <a-button :disabled="!docForm.url" @click="embedDoc">
-                <EyeOutlined /> 嵌入预览
-              </a-button>
-              <a-button :disabled="!docForm.url" @click="openDocInBrowser">
-                <GlobalOutlined /> 在浏览器打开
-              </a-button>
-            </a-space>
-          </a-form>
-        </a-card>
-
-        <!-- Webview 嵌入预览区 -->
-        <a-card v-if="embeddedDocUrl" class="docs-preview" size="small" :bordered="true">
-          <template #title>
-            <span><EyeOutlined /> {{ embeddedDocTitle || '文档预览' }}</span>
-          </template>
-          <template #extra>
-            <a-button size="small" type="text" @click="closeEmbed"><CloseOutlined /></a-button>
-          </template>
-          <webview
-            :src="embeddedDocUrl"
-            class="docs-webview"
-            :useragent="webviewUserAgent"
-            allowpopups
-          />
-        </a-card>
-      </a-tab-pane>
-    </a-tabs>
-
-    <!-- ============ 新建点子 Modal ============ -->
-    <a-modal
-      v-model:open="newIdeaModalVisible"
-      title="新建点子"
-      :confirm-loading="newIdeaSubmitting"
-      @ok="submitNewIdea"
-    >
-      <a-form layout="vertical">
-        <a-form-item label="标题" required>
-          <a-input v-model:value="newIdeaForm.title" placeholder="一句话描述你的灵感" />
-        </a-form-item>
-        <a-form-item label="目标课程">
-          <a-input v-model:value="newIdeaForm.targetCourse" placeholder="如：Scratch 入门、Python 进阶" />
-        </a-form-item>
-        <a-form-item label="描述">
-          <a-textarea v-model:value="newIdeaForm.description" :rows="3" placeholder="详细描述点子内容、教学目标等" />
-        </a-form-item>
-        <a-form-item label="状态">
-          <a-select v-model:value="newIdeaForm.status">
-            <a-select-option value="idea">点子</a-select-option>
-            <a-select-option value="developing">开发中</a-select-option>
-            <a-select-option value="archived">已归档</a-select-option>
-          </a-select>
-        </a-form-item>
-      </a-form>
-    </a-modal>
-
-    <!-- ============ 新建版本 Modal ============ -->
-    <a-modal
-      v-model:open="newVersionModalVisible"
-      :title="`新建版本 - ${newVersionIdeaTitle}`"
-      :confirm-loading="newVersionSubmitting"
-      @ok="submitNewVersion"
-    >
-      <a-form layout="vertical">
-        <a-form-item label="版本名称" required>
-          <a-input v-model:value="newVersionForm.versionName" placeholder="如 v1.0" />
-        </a-form-item>
-        <a-form-item label="备注">
-          <a-textarea v-model:value="newVersionForm.notes" :rows="3" placeholder="本次版本的改动说明（可选）" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
-
-    <!-- ============ Scratch 保存归档 Modal ============ -->
-    <a-modal
-      v-model:open="saveModalVisible"
-      title="保存到"
-      :confirm-loading="saveSubmitting"
-      :ok-text="saveTarget === 'idea' ? '保存到点子库' : '保存到资源库'"
-      @ok="submitSave"
-    >
-      <a-radio-group v-model:value="saveTarget" class="save-radio">
-        <a-radio value="idea">保存到点子库（作为某点子的新版本）</a-radio>
-        <a-radio value="resource">保存到资源库（作为可复用素材）</a-radio>
-      </a-radio-group>
-
-      <div v-if="saveTarget === 'idea'" class="save-idea-form">
-        <a-form layout="vertical">
-          <a-form-item label="所属点子" required>
-            <a-select
-              v-model:value="saveForm.ideaId"
-              placeholder="选择目标点子"
-              :loading="saveIdeasLoading"
-              :options="ideaSelectOptions"
-              show-search
-              option-filter-prop="label"
-            />
-          </a-form-item>
-          <a-form-item label="版本名称" required>
-            <a-input v-model:value="saveForm.versionName" placeholder="如 v1.0" />
-          </a-form-item>
-          <a-form-item label="备注">
-            <a-textarea v-model:value="saveForm.notes" :rows="3" placeholder="版本备注（可选）" />
-          </a-form-item>
-        </a-form>
-      </div>
-      <div v-else class="save-resource-tip">
-        <a-alert
-          type="info"
-          show-icon
-          message="将作为通用素材保存到资源库，可在「资源库」标签页中管理。"
-        />
-      </div>
-    </a-modal>
-  </div>
-</template>
 
 <style scoped>
 .prep-tabs {
@@ -850,17 +896,6 @@ onUnmounted(() => {
 .docs-form {
   max-width: 560px;
 }
-.docs-preview {
-  margin-top: 16px;
-}
-.docs-webview {
-  display: block;
-  width: 100%;
-  height: 520px;
-  border: 1px solid #eef0f4;
-  border-radius: 6px;
-  background: #fff;
-}
 .text-muted {
   color: #9ca3af;
 }
@@ -877,5 +912,10 @@ onUnmounted(() => {
 .save-resource-tip {
   border-top: 1px solid #eef0f4;
   padding-top: 12px;
+}
+.tag-tip {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 4px;
 }
 </style>

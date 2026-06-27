@@ -1,232 +1,3 @@
-<script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { message, Modal } from 'ant-design-vue'
-import { h } from 'vue'
-import {
-  SaveOutlined,
-  SyncOutlined,
-  DownloadOutlined,
-  UploadOutlined,
-  ExclamationCircleOutlined
-} from '@ant-design/icons-vue'
-import dayjs from 'dayjs'
-import { call } from '@renderer/api'
-import type {
-  AISettings,
-  AppSettings,
-  ScratchSettings,
-  SyncSettings,
-  WeChatSettings
-} from '@shared/types'
-
-const activeTab = ref<'ai' | 'sync' | 'wechat' | 'scratch' | 'backup'>('ai')
-const loading = ref(true)
-
-// 数据备份
-const exporting = ref(false)
-const importing = ref(false)
-const lastExportPath = ref('')
-const lastImportInfo = ref<{ tables: number; rows: number } | null>(null)
-
-const ai = reactive<AISettings>({
-  useCustomAI: false,
-  baseUrl: '',
-  apiKey: '',
-  modelId: '',
-  visionModelId: '',
-  systemPrompt: '',
-  maxConcurrent: 1
-})
-
-const sync = reactive<SyncSettings>({
-  enabled: false,
-  serverUrl: '',
-  token: '',
-  lastSyncAt: null,
-  autoSync: false
-})
-
-const wechat = reactive<WeChatSettings>({
-  defaultGroupName: '',
-  searchHotkey: '',
-  sendDelayMs: 500,
-  autoActivate: false
-})
-
-const scratch = reactive<ScratchSettings>({
-  guiUrl: 'http://localhost:8601',
-  autoLaunch: false,
-  workspaceDir: ''
-})
-
-const savingAi = ref(false)
-const savingSync = ref(false)
-const savingWechat = ref(false)
-const savingScratch = ref(false)
-const testingAi = ref(false)
-const testingSync = ref(false)
-const syncing = ref(false)
-
-function applySettings(s: AppSettings): void {
-  Object.assign(ai, s.ai)
-  Object.assign(sync, s.sync)
-  Object.assign(wechat, s.wechat)
-  Object.assign(scratch, s.scratch)
-}
-
-async function load(): Promise<void> {
-  loading.value = true
-  try {
-    const s = await call(window.api.settings.get())
-    applySettings(s)
-  } catch (e) {
-    message.error('加载设置失败：' + String(e))
-  } finally {
-    loading.value = false
-  }
-}
-
-async function saveAi(): Promise<void> {
-  savingAi.value = true
-  try {
-    await call(window.api.settings.saveAI({ ...ai }))
-    message.success('AI 配置已保存')
-  } catch (e) {
-    message.error(String(e))
-  } finally {
-    savingAi.value = false
-  }
-}
-
-async function testAi(): Promise<void> {
-  testingAi.value = true
-  try {
-    const res = await call(window.api.settings.testAI())
-    if (res.ok) message.success(res.message || '连接成功')
-    else message.warning(res.message || '连接失败')
-  } catch (e) {
-    message.error(String(e))
-  } finally {
-    testingAi.value = false
-  }
-}
-
-async function saveSync(): Promise<void> {
-  savingSync.value = true
-  try {
-    await call(window.api.settings.saveSync({ ...sync }))
-    message.success('同步配置已保存')
-  } catch (e) {
-    message.error(String(e))
-  } finally {
-    savingSync.value = false
-  }
-}
-
-async function testSync(): Promise<void> {
-  testingSync.value = true
-  try {
-    const res = await call(window.api.settings.testSync())
-    if (res.ok) message.success(res.message || '连接成功')
-    else message.warning(res.message || '连接失败')
-  } catch (e) {
-    message.error(String(e))
-  } finally {
-    testingSync.value = false
-  }
-}
-
-async function syncNow(): Promise<void> {
-  syncing.value = true
-  try {
-    const res = await call(window.api.settings.syncNow())
-    if (res.ok) message.success(res.message || '同步完成')
-    else message.warning(res.message || '同步失败')
-    // 同步后刷新 lastSyncAt
-    try {
-      const s = await call(window.api.settings.get())
-      Object.assign(sync, s.sync)
-    } catch {
-      /* ignore */
-    }
-  } catch (e) {
-    message.error(String(e))
-  } finally {
-    syncing.value = false
-  }
-}
-
-async function saveWechat(): Promise<void> {
-  savingWechat.value = true
-  try {
-    await call(window.api.settings.saveWeChat({ ...wechat }))
-    message.success('企业微信配置已保存')
-  } catch (e) {
-    message.error(String(e))
-  } finally {
-    savingWechat.value = false
-  }
-}
-
-async function saveScratch(): Promise<void> {
-  savingScratch.value = true
-  try {
-    await call(window.api.settings.saveScratch({ ...scratch }))
-    message.success('Scratch 配置已保存')
-  } catch (e) {
-    message.error(String(e))
-  } finally {
-    savingScratch.value = false
-  }
-}
-
-// ============ 数据备份 ============
-async function onExport(): Promise<void> {
-  exporting.value = true
-  try {
-    const json = await call(window.api.data.export())
-    const path = await call(window.api.data.saveExportToFile(json))
-    lastExportPath.value = path
-    message.success('已导出备份：' + path, 6)
-  } catch (e) {
-    message.error(String(e))
-  } finally {
-    exporting.value = false
-  }
-}
-
-function onImport(): void {
-  Modal.confirm({
-    title: '确认导入数据',
-    icon: h(ExclamationCircleOutlined),
-    content: '导入操作将清空并覆盖当前所有数据，且不可恢复。建议先导出当前数据备份。是否继续？',
-    okText: '确认导入',
-    okType: 'danger',
-    cancelText: '取消',
-    async onOk() {
-      importing.value = true
-      try {
-        const filePath = await call(window.api.data.pickImportFile())
-        if (!filePath) {
-          importing.value = false
-          return
-        }
-        const info = await call(window.api.data.importFromFile(filePath))
-        lastImportInfo.value = info
-        message.success(`导入成功：${info.tables} 张表 / ${info.rows} 条记录`)
-        await load()
-      } catch (e) {
-        message.error(String(e))
-      } finally {
-        importing.value = false
-      }
-    }
-  })
-}
-
-onMounted(load)
-</script>
-
 <template>
   <div class="page-container">
     <a-spin :spinning="loading">
@@ -411,61 +182,301 @@ onMounted(load)
         <a-tab-pane key="backup" tab="数据备份">
           <a-card>
             <a-alert
-              type="info"
-              show-icon
-              style="margin-bottom: 16px"
-              message="数据备份与恢复"
-              description="可一键导出全部业务数据（学生、班级、课次、点子、反馈等）为 JSON 备份文件，或从备份文件恢复数据。导入操作会覆盖现有数据，请谨慎使用。"
-            />
-
-            <a-row :gutter="16">
-              <a-col :span="12">
-                <a-card class="backup-card" size="small" title="导出备份">
-                  <p class="backup-desc">将当前全部数据导出为 JSON 文件，保存到本地。</p>
-                  <a-button
-                    type="primary"
-                    :loading="exporting"
-                    @click="onExport"
-                  >
-                    <DownloadOutlined />
-                    立即导出
-                  </a-button>
-                  <div v-if="lastExportPath" class="backup-result">
-                    上次导出：{{ lastExportPath }}
-                  </div>
-                </a-card>
-              </a-col>
-              <a-col :span="12">
-                <a-card class="backup-card" size="small" title="导入恢复">
-                  <p class="backup-desc">从备份 JSON 文件恢复数据（将覆盖现有数据）。</p>
-                  <a-button
-                    :loading="importing"
-                    @click="onImport"
-                  >
-                    <UploadOutlined />
-                    选择文件导入
-                  </a-button>
-                  <div v-if="lastImportInfo" class="backup-result">
-                    上次导入：{{ lastImportInfo.tables }} 张表 / {{ lastImportInfo.rows }} 条记录
-                  </div>
-                </a-card>
-              </a-col>
-            </a-row>
-
-            <a-divider />
-
-            <a-alert
               type="warning"
               show-icon
+              style="margin-bottom: 16px"
               message="注意事项"
-              description="1. 导入会清空并覆盖当前所有数据，建议先导出一份备份；2. 备份文件包含敏感信息（学生姓名等），请妥善保管；3. 日志文件位于应用数据目录的 logs 子文件夹。"
+              description="导出将生成包含全部数据的 JSON 文件；导入会覆盖当前数据且不可恢复，请谨慎操作。建议在导入前先导出一份备份。"
             />
+            <a-row :gutter="16">
+              <a-col :span="12">
+                <div class="backup-card">
+                  <div class="backup-desc">将当前所有数据导出为 JSON 文件保存到本地。</div>
+                  <a-button type="primary" :loading="exporting" @click="onExport">
+                    <DownloadOutlined />
+                    导出数据
+                  </a-button>
+                  <div v-if="lastExportPath" class="backup-result">
+                    上次导出路径：{{ lastExportPath }}
+                  </div>
+                </div>
+              </a-col>
+              <a-col :span="12">
+                <div class="backup-card">
+                  <div class="backup-desc">从 JSON 文件导入数据，将覆盖当前数据。</div>
+                  <a-button danger :loading="importing" @click="onImport">
+                    <UploadOutlined />
+                    导入数据
+                  </a-button>
+                  <div v-if="lastImportInfo" class="backup-result">
+                    上次导入：{{ lastImportInfo.tables }} 张表 / {{ lastImportInfo.rows }} 行
+                  </div>
+                </div>
+              </a-col>
+            </a-row>
           </a-card>
         </a-tab-pane>
       </a-tabs>
     </a-spin>
   </div>
 </template>
+
+<script setup lang="ts">
+import { ref, reactive, onMounted, onUnmounted, h } from 'vue'
+import { message, Modal } from 'ant-design-vue'
+import {
+  SaveOutlined,
+  SyncOutlined,
+  DownloadOutlined,
+  UploadOutlined,
+  ExclamationCircleOutlined
+} from '@ant-design/icons-vue'
+import dayjs from 'dayjs'
+import { call } from '@renderer/api'
+import { subscribeRefresh } from '@renderer/composables/useShortcuts'
+import type {
+  AISettings,
+  AppSettings,
+  ScratchSettings,
+  SyncSettings,
+  WeChatSettings
+} from '@shared/types'
+
+const activeTab = ref<'ai' | 'sync' | 'wechat' | 'scratch' | 'backup'>('ai')
+const loading = ref(true)
+
+// 数据备份相关状态
+const exporting = ref(false)
+const importing = ref(false)
+const lastExportPath = ref('')
+const lastImportInfo = ref<{ tables: number; rows: number } | null>(null)
+
+const ai = reactive<AISettings>({
+  useCustomAI: false,
+  baseUrl: '',
+  apiKey: '',
+  modelId: '',
+  visionModelId: '',
+  systemPrompt: '',
+  maxConcurrent: 1
+})
+
+const sync = reactive<SyncSettings>({
+  enabled: false,
+  serverUrl: '',
+  token: '',
+  lastSyncAt: null,
+  autoSync: false
+})
+
+const wechat = reactive<WeChatSettings>({
+  defaultGroupName: '',
+  searchHotkey: '',
+  sendDelayMs: 500,
+  autoActivate: false
+})
+
+const scratch = reactive<ScratchSettings>({
+  guiUrl: 'http://localhost:8601',
+  autoLaunch: false,
+  workspaceDir: ''
+})
+
+const savingAi = ref(false)
+const savingSync = ref(false)
+const savingWechat = ref(false)
+const savingScratch = ref(false)
+const testingAi = ref(false)
+const testingSync = ref(false)
+const syncing = ref(false)
+
+function applySettings(s: AppSettings): void {
+  Object.assign(ai, s.ai)
+  Object.assign(sync, s.sync)
+  Object.assign(wechat, s.wechat)
+  Object.assign(scratch, s.scratch)
+}
+
+async function load(): Promise<void> {
+  loading.value = true
+  try {
+    const s = await call(window.api.settings.get())
+    applySettings(s)
+  } catch (e) {
+    message.error('加载设置失败：' + String(e))
+  } finally {
+    loading.value = false
+  }
+}
+
+async function saveAi(): Promise<void> {
+  savingAi.value = true
+  try {
+    await call(window.api.settings.saveAI({ ...ai }))
+    message.success('AI 配置已保存')
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    savingAi.value = false
+  }
+}
+
+async function testAi(): Promise<void> {
+  testingAi.value = true
+  try {
+    const res = await call(window.api.settings.testAI())
+    if (res.ok) message.success(res.message || '连接成功')
+    else message.warning(res.message || '连接失败')
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    testingAi.value = false
+  }
+}
+
+async function saveSync(): Promise<void> {
+  savingSync.value = true
+  try {
+    await call(window.api.settings.saveSync({ ...sync }))
+    message.success('同步配置已保存')
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    savingSync.value = false
+  }
+}
+
+async function testSync(): Promise<void> {
+  testingSync.value = true
+  try {
+    const res = await call(window.api.settings.testSync())
+    if (res.ok) message.success(res.message || '连接成功')
+    else message.warning(res.message || '连接失败')
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    testingSync.value = false
+  }
+}
+
+async function syncNow(): Promise<void> {
+  syncing.value = true
+  try {
+    const res = await call(window.api.settings.syncNow())
+    if (res.ok) message.success(res.message || '同步完成')
+    else message.warning(res.message || '同步失败')
+    // 同步后刷新 lastSyncAt
+    try {
+      const s = await call(window.api.settings.get())
+      Object.assign(sync, s.sync)
+    } catch {
+      /* ignore */
+    }
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    syncing.value = false
+  }
+}
+
+async function saveWechat(): Promise<void> {
+  savingWechat.value = true
+  try {
+    await call(window.api.settings.saveWeChat({ ...wechat }))
+    message.success('企业微信配置已保存')
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    savingWechat.value = false
+  }
+}
+
+async function saveScratch(): Promise<void> {
+  savingScratch.value = true
+  try {
+    await call(window.api.settings.saveScratch({ ...scratch }))
+    message.success('Scratch 配置已保存')
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    savingScratch.value = false
+  }
+}
+
+// ============ 数据备份 ============
+// 导出数据：导出为 JSON 字符串后保存到文件
+async function onExport(): Promise<void> {
+  exporting.value = true
+  try {
+    const json = await call(window.api.data.export())
+    const path = await call(window.api.data.saveExportToFile(json))
+    lastExportPath.value = path
+    message.success('数据已导出')
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    exporting.value = false
+  }
+}
+
+// 导入数据：二次确认 -> 选择文件 -> 导入
+function onImport(): void {
+  Modal.confirm({
+    title: '导入数据',
+    icon: h(ExclamationCircleOutlined),
+    content: '导入将覆盖当前数据，该操作不可恢复，确定继续吗？',
+    okText: '选择文件并导入',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      importing.value = true
+      try {
+        const filePath = await call(window.api.data.pickImportFile())
+        // 用户取消选择则直接返回
+        if (!filePath) {
+          importing.value = false
+          return
+        }
+        const info = await call(window.api.data.importFromFile(filePath))
+        lastImportInfo.value = info
+        message.success(`导入成功：${info.tables} 张表 / ${info.rows} 行`)
+        // 导入后重新加载设置
+        await load()
+      } catch (e) {
+        message.error(String(e))
+      } finally {
+        importing.value = false
+      }
+    }
+  })
+}
+
+// 监听来自快捷键的备份动作：切换到备份 tab 并触发对应操作
+function handleBackupAction(e: Event): void {
+  const detail = (e as CustomEvent<{ action: string }>).detail
+  if (!detail) return
+  activeTab.value = 'backup'
+  if (detail.action === 'export') {
+    onExport()
+  } else if (detail.action === 'import') {
+    onImport()
+  }
+}
+
+let offRefresh: (() => void) | null = null
+onMounted(() => {
+  load()
+  // 订阅全局刷新事件
+  offRefresh = subscribeRefresh(load)
+  // 监听快捷键触发的备份动作
+  window.addEventListener('workbench:goto-backup', handleBackupAction)
+})
+onUnmounted(() => {
+  offRefresh?.()
+  offRefresh = null
+  window.removeEventListener('workbench:goto-backup', handleBackupAction)
+})
+</script>
 
 <style scoped>
 .form-actions {
@@ -479,17 +490,27 @@ onMounted(load)
   font-size: 12px;
 }
 .backup-card {
-  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #eef0f4;
+  border-radius: 8px;
+  background: #fafafa;
+  height: 100%;
 }
 .backup-desc {
-  color: #6b7280;
-  margin: 0 0 12px;
   font-size: 13px;
+  color: #4b5563;
+  line-height: 1.6;
 }
 .backup-result {
-  margin-top: 12px;
   font-size: 12px;
   color: #6b7280;
   word-break: break-all;
+  background: #fff;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #eef0f4;
 }
 </style>

@@ -1,106 +1,69 @@
-import { db } from './db'
-import * as studentRepo from './repositories/students'
-import * as classRepo from './repositories/classes'
-import * as ideaRepo from './repositories/ideas'
-import * as lessonRepo from './repositories/lessons'
+import { db, uuid } from './db'
 import { seedBuiltinTemplates } from './repositories/feedback-templates'
 
 /**
- * 首次启动时插入演示数据（仅在数据库完全为空时执行）
- * 方便用户首次打开时看到完整功能，而非空列表
+ * 种子数据：数据库为空时插入示例数据。
+ * 1. 先播种内置反馈模板（失败仅记录错误，不阻断流程）
+ * 2. students 表为空时插入示例学生、班级、关联、点子
  */
 export function seedIfEmpty(): void {
-  const conn = db()
-  // 内置反馈模板始终尝试初始化（内部会判空）
+  // 先播种内置反馈模板
   try {
     seedBuiltinTemplates()
   } catch (e) {
-    console.error('内置模板初始化失败', e)
+    console.error('播种内置模板失败', e)
   }
 
-  const count = conn.prepare('SELECT COUNT(*) as n FROM students').get() as { n: number }
-  if (count.n > 0) return
+  // 检查 students 表是否为空
+  const studentCount = (db().prepare(`SELECT COUNT(*) as c FROM students`).get() as { c: number }).c
+  if (studentCount > 0) return
 
-  // ============ 学生 ============
-  const students = [
-    { name: '小明', tags: ['Scratch中阶'] },
-    { name: '小红', tags: ['Scratch中阶', '集训'] },
-    { name: '小华', tags: ['Scratch中阶'] },
-    { name: '小亮', tags: ['集训'] },
-    { name: '小芳', tags: ['Scratch中阶', '试听'] }
-  ]
-  const studentIds = students.map((s) =>
-    studentRepo.create({ name: s.name, tags: s.tags })
+  // ============ 3 个示例学生 ============
+  const zhangId = uuid()
+  const liId = uuid()
+  const wangId = uuid()
+  const insertStudent = db().prepare(
+    `INSERT INTO students (id, name, grade, tags) VALUES (?, ?, ?, ?)`
   )
+  insertStudent.run(zhangId, '张小明', '三年级', JSON.stringify(['集训']))
+  insertStudent.run(liId, '李大壮', '四年级', JSON.stringify(['常规']))
+  insertStudent.run(wangId, '王小红', '二年级', JSON.stringify(['试听']))
 
-  // ============ 班级 ============
-  const classRegular = classRepo.create({
-    name: 'Scratch中阶-周三',
-    type: 'regular',
-    scheduleRule: { weekday: 3, startTime: '16:00', endTime: '17:30', subject: 'Scratch中阶' }
-  })
-  const classTraining = classRepo.create({
-    name: 'Scratch集训班',
-    type: 'training',
-    scheduleRule: { weekday: 6, startTime: '09:00', endTime: '11:00', subject: 'Scratch集训' }
-  })
+  // ============ 2 个示例班级 ============
+  const basicClassId = uuid()
+  const trainingClassId = uuid()
+  const insertClass = db().prepare(
+    `INSERT INTO classes (id, name, type, schedule_rule) VALUES (?, ?, ?, ?)`
+  )
+  insertClass.run(basicClassId, '周六Scratch基础班', 'regular', null)
+  insertClass.run(trainingClassId, '暑期集训营', 'training', null)
 
-  // 中阶班：前3名学生；集训班：第2、4名学生
-  classRepo.addMembers(classRegular.id, [studentIds[0].id, studentIds[1].id, studentIds[2].id])
-  classRepo.addMembers(classTraining.id, [studentIds[1].id, studentIds[3].id])
+  // ============ enrollments 关联 ============
+  const insertEnrollment = db().prepare(
+    `INSERT INTO enrollments (id, student_id, class_id) VALUES (?, ?, ?)`
+  )
+  // 张小明 + 李大壮 到基础班
+  insertEnrollment.run(uuid(), zhangId, basicClassId)
+  insertEnrollment.run(uuid(), liId, basicClassId)
+  // 全部 3 人到集训营
+  insertEnrollment.run(uuid(), zhangId, trainingClassId)
+  insertEnrollment.run(uuid(), liId, trainingClassId)
+  insertEnrollment.run(uuid(), wangId, trainingClassId)
 
-  // ============ 课次（本周） ============
-  const today = new Date()
-  const dayOfWeek = today.getDay()
-
-  // 本周三的课次
-  const wedOffset = (3 - dayOfWeek + 7) % 7 || 7
-  const wedDate = new Date(today)
-  wedDate.setDate(today.getDate() + wedOffset)
-  wedDate.setHours(16, 0, 0, 0)
-  const wedEnd = new Date(wedDate)
-  wedEnd.setHours(17, 30, 0, 0)
-
-  lessonRepo.create({
-    classId: classRegular.id,
-    startTime: wedDate.toISOString(),
-    endTime: wedEnd.toISOString(),
-    subject: 'Scratch中阶'
-  })
-
-  // 本周六集训
-  const satOffset = (6 - dayOfWeek + 7) % 7 || 7
-  const satDate = new Date(today)
-  satDate.setDate(today.getDate() + satOffset)
-  satDate.setHours(9, 0, 0, 0)
-  const satEnd = new Date(satDate)
-  satEnd.setHours(11, 0, 0, 0)
-
-  lessonRepo.create({
-    classId: classTraining.id,
-    startTime: satDate.toISOString(),
-    endTime: satEnd.toISOString(),
-    subject: 'Scratch集训'
-  })
-
-  // ============ 点子库 ============
-  const idea1 = ideaRepo.create({
-    title: '太空大冒险',
-    targetCourse: 'Scratch中阶',
-    description: '制作一个太空飞船躲避陨石的游戏，学习克隆、碰撞检测和变量。',
-    status: 'developing'
-  })
-  ideaRepo.createVersion({
-    ideaId: idea1.id,
-    versionName: 'v1.0',
-    notes: '基础版本：飞船移动 + 陨石下落'
-  })
-
-  const idea2 = ideaRepo.create({
-    title: '动画故事书',
-    targetCourse: 'Scratch初阶',
-    description: '多场景切换的动画故事，学习广播、造型切换和声音播放。',
-    status: 'idea'
-  })
-  void idea2
+  // ============ 2 个示例点子 ============
+  const insertIdea = db().prepare(
+    `INSERT INTO ideas (id, title, description, status) VALUES (?, ?, ?, ?)`
+  )
+  insertIdea.run(
+    uuid(),
+    '太空冒险游戏',
+    '一个控制飞船躲避陨石、收集能量晶体的太空冒险 Scratch 游戏，包含多关卡与计分系统。',
+    'idea'
+  )
+  insertIdea.run(
+    uuid(),
+    '互动故事书',
+    '通过点击选择分支剧情的互动故事书，包含多个结局与角色对话动画。',
+    'idea'
+  )
 }

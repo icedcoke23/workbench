@@ -12,7 +12,6 @@ const ROOT = resolve(__dirname, '..')
 const BUILD_DIR = resolve(ROOT, 'build')
 const SVG_PATH = resolve(BUILD_DIR, 'icon.svg')
 
-// ICO 中包含的尺寸
 const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 
 /**
@@ -25,36 +24,29 @@ function buildIco(images) {
   const dirEntrySize = 16
   const totalHeader = headerSize + dirEntrySize * images.length
 
-  // 计算每个图像的偏移
   let offset = totalHeader
   const entries = images.map((img) => {
-    const entry = {
-      size: img.size,
-      data: img.data,
-      offset
-    }
+    const entry = { size: img.size, data: img.data, offset }
     offset += img.data.length
     return entry
   })
 
-  // ICONDIR header
   const header = Buffer.alloc(headerSize)
-  header.writeUInt16LE(0, 0) // reserved
-  header.writeUInt16LE(1, 2) // type: 1 = ICO
-  header.writeUInt16LE(images.length, 4) // count
+  header.writeUInt16LE(0, 0)
+  header.writeUInt16LE(1, 2)
+  header.writeUInt16LE(images.length, 4)
 
-  // ICONDIRENTRY 列表
   const dirEntries = entries.map((entry) => {
     const buf = Buffer.alloc(dirEntrySize)
     const s = entry.size
-    buf.writeUInt8(s >= 256 ? 0 : s, 0) // width (0 表示 256)
-    buf.writeUInt8(s >= 256 ? 0 : s, 1) // height
-    buf.writeUInt8(0, 2) // color palette count (0 = no palette)
-    buf.writeUInt8(0, 3) // reserved
-    buf.writeUInt16LE(1, 4) // color planes
-    buf.writeUInt16LE(32, 6) // bits per pixel
-    buf.writeUInt32LE(entry.data.length, 8) // image size in bytes
-    buf.writeUInt32LE(entry.offset, 12) // image data offset
+    buf.writeUInt8(s >= 256 ? 0 : s, 0)
+    buf.writeUInt8(s >= 256 ? 0 : s, 1)
+    buf.writeUInt8(0, 2)
+    buf.writeUInt8(0, 3)
+    buf.writeUInt16LE(1, 4)
+    buf.writeUInt16LE(32, 6)
+    buf.writeUInt32LE(entry.data.length, 8)
+    buf.writeUInt32LE(entry.offset, 12)
     return buf
   })
 
@@ -69,17 +61,18 @@ async function main() {
   const pngImages = []
   for (const size of ICO_SIZES) {
     const png = await sharp(svgBuffer, { density: 384 })
-      .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .resize(size, size, {
+        fit: 'contain',
+        background: { r: 0, g: 0, b: 0, alpha: 0 }
+      })
       .png()
       .toBuffer()
     pngImages.push({ size, data: png })
-    // 同时保存单独的 PNG
     const pngPath = resolve(BUILD_DIR, `icon-${size}.png`)
     writeFileSync(pngPath, png)
     console.log(`  ✓ ${size}x${size} -> ${pngPath}`)
   }
 
-  // 保存 256 作为通用 icon.png
   const png256 = pngImages.find((i) => i.size === 256)
   if (png256) {
     writeFileSync(resolve(BUILD_DIR, 'icon.png'), png256.data)

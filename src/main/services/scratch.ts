@@ -1,5 +1,5 @@
-import { BrowserWindow, ipcMain, dialog, app } from 'electron'
-import { join } from 'path'
+import { BrowserWindow, ipcMain, app } from 'electron'
+import { join, resolve, basename } from 'path'
 import { mkdir, writeFile, readFile } from 'fs/promises'
 import { existsSync, readFileSync } from 'fs'
 import JSZip from 'jszip'
@@ -21,14 +21,40 @@ function workspaceDir(): string {
   return join(app.getPath('userData'), 'scratch-projects')
 }
 
+/** 资源根目录，用于 read-resource 路径白名单校验 */
+function resourcesRoot(): string {
+  return join(app.getPath('userData'), 'resources')
+}
+
+/**
+ * 校验路径必须位于允许的根目录内，防止 scratch-gui 页面读取任意本地文件。
+ * 允许：userData/resources、userData/scratch-projects、scratch 工作目录。
+ */
+function assertSafePath(filePath: string): void {
+  const allowedRoots = [resourcesRoot(), workspaceDir()].map((p) => resolve(p))
+  const target = resolve(filePath)
+  const safe = allowedRoots.some((root) => target === root || target.startsWith(root + '\\') || target.startsWith(root + '/'))
+  if (!safe) {
+    throw new Error(`禁止访问资源目录之外的文件：${filePath}`)
+  }
+}
+
+/** 净化文件名：去除路径分隔符与危险字符，仅保留安全字符 */
+function safeFileName(name: string): string {
+  const base = basename(name)
+  return base.replace(/[^\w.\u4e00-\u9fa5-]/g, '_') || 'untitled'
+}
+
 /** 启动 Scratch 编辑器窗口，可选加载某版本 */
 export async function launch(versionId?: string): Promise<void> {
+  // 已存在窗口：聚焦并加载请求的版本（而非忽略 versionId）
   if (scratchWin && !scratchWin.isDestroyed()) {
     scratchWin.focus()
+    if (versionId) await loadVersionInto(scratchWin, versionId)
     return
   }
   const settings = getScratch()
-  scratchWin = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1280,
     height: 820,
     title: 'Scratch 编辑器',
@@ -39,25 +65,49 @@ export async function launch(versionId?: string): Promise<void> {
       sandbox: false
     }
   })
+  scratchWin = win
 
-  await scratchWin.loadURL(settings.guiUrl)
+  // 窗口生命周期监听：关闭/崩溃时清理引用
+  win.on('closed', () => {
+    if (scratchWin === win) scratchWin = null
+  })
+  win.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[scratch] 编辑器渲染进程崩溃', details)
+    if (!win.isDestroyed()) win.destroy()
+    if (scratchWin === win) scratchWin = null
+  })
 
-  if (versionId) {
-    const version = ideaRepo.getVersion(versionId)
-    if (version?.filePath && existsSync(version.filePath)) {
-      // 读取 .sb3 中的 project.json 注入到编辑器
-      try {
-        const projectJson = await readSb3ProjectJson(version.filePath)
-        scratchWin.webContents.send('scratch:load-project', projectJson)
-      } catch (e) {
-        console.error('加载版本失败', e)
-      }
-    }
+  try {
+    await win.loadURL(settings.guiUrl)
+  } catch (e) {
+    console.error('[scratch] 加载 Scratch GUI 失败', e)
+    if (!win.isDestroyed()) win.destroy()
+    scratchWin = null
+    throw new Error('无法加载 Scratch 编辑器，请检查设置中的 GUI 地址')
+  }
+
+  if (versionId) await loadVersionInto(win, versionId)
+}
+
+/** 读取版本 .sb3 的 project.json 并注入到指定窗口 */
+async function loadVersionInto(win: BrowserWindow, versionId: string): Promise<void> {
+  const version = ideaRepo.getVersion(versionId)
+  if (!version?.filePath || !existsSync(version.filePath)) return
+  try {
+    const projectJson = await readSb3ProjectJson(version.filePath)
+    // 等待页面完成基础加载后再发送，避免监听尚未注册导致消息丢失
+    await new Promise<void>((resolveWait) => {
+      if (!win.webContents.isLoading()) resolveWait()
+      else win.webContents.once('did-finish-load', () => resolveWait())
+    })
+    win.webContents.send('scratch:load-project', projectJson)
+  } catch (e) {
+    console.error('[scratch] 加载版本失败', e)
   }
 }
 
 export function close(): void {
-  if (scratchWin && !scratchWin.isDestroyed()) scratchWin.close()
+  if (scratchWin && !scratchWin.isDestroyed()) scratchWin.destroy()
   scratchWin = null
 }
 
@@ -80,32 +130,15 @@ export function registerScratchIpc(): void {
     scratchWin?.webContents.send('scratch:resources', list)
   })
 
-  // scratch-gui 读取本地资源文件 -> base64
+  // scratch-gui 读取本地资源文件 -> base64（路径必须位于资源/工作目录白名单内）
   ipcMain.handle('scratch:read-resource', async (_e, filePath: string) => {
     try {
+      assertSafePath(filePath)
       const buf = await readFile(filePath)
       return { ok: true, data: buf.toString('base64') }
     } catch (err) {
       return { ok: false, error: String(err) }
     }
-  })
-
-  // 渲染进程请求打开资源选择器（侧边栏入口）
-  ipcMain.handle('scratch:pickResourceFile', async () => {
-    const res = await dialog.showOpenDialog({
-      title: '选择素材文件',
-      filters: [
-        { name: '图片/音频', extensions: ['png', 'jpg', 'jpeg', 'svg', 'gif', 'wav', 'mp3'] }
-      ],
-      properties: ['openFile']
-    })
-    if (res.canceled || !res.filePaths.length) return { ok: false, error: '取消选择' }
-    const fp = res.filePaths[0]
-    const name = fp.split(/[\\/]/).pop() ?? 'resource'
-    const ext = name.split('.').pop()?.toLowerCase() ?? ''
-    const type: Resource['type'] = ['wav', 'mp3'].includes(ext) ? 'sound' : ext === 'svg' ? 'sprite' : 'sprite'
-    const created = resourceRepo.create({ name, type, filePath: fp })
-    return { ok: true, data: created }
   })
 }
 
@@ -114,9 +147,12 @@ export async function saveToIdea(
   payload: ScratchSavePayload,
   target: ArchiveTarget
 ): Promise<IdeaVersion> {
-  const dir = join(workspaceDir(), target.ideaId)
+  // 净化 ideaId 与 versionName，防止路径遍历
+  const safeIdeaId = target.ideaId.replace(/[^\w-]/g, '')
+  if (!safeIdeaId) throw new Error('无效的点子 ID')
+  const dir = join(workspaceDir(), safeIdeaId)
   await mkdir(dir, { recursive: true })
-  const safeName = target.versionName.replace(/[^\w.-]/g, '_')
+  const safeName = safeFileName(target.versionName)
   const filePath = join(dir, `${safeName}-${Date.now()}.sb3`)
   const sb3 = await packSb3(payload.projectJson)
   await writeFile(filePath, sb3)
@@ -132,7 +168,7 @@ export async function saveToIdea(
 export async function saveToResource(payload: ScratchSavePayload): Promise<Resource> {
   const dir = join(workspaceDir(), '_resources')
   await mkdir(dir, { recursive: true })
-  const name = payload.fileName || `scratch-${Date.now()}`
+  const name = safeFileName(payload.fileName || `scratch-${Date.now()}`)
   const filePath = join(dir, `${name}.sb3`)
   const sb3 = await packSb3(payload.projectJson)
   await writeFile(filePath, sb3)

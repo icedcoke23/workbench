@@ -1,135 +1,181 @@
-import { app } from 'electron'
-import {
-  appendFileSync,
-  mkdirSync,
-  existsSync,
-  statSync,
-  renameSync,
-  readdirSync,
-  unlinkSync
-} from 'fs'
+import { mkdirSync, appendFileSync, readdirSync, unlinkSync, statSync, existsSync, renameSync } from 'fs'
 import { join } from 'path'
+import { app } from 'electron'
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+// 日志级别与顺序（索引越大级别越高）
+type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+const LEVEL_ORDER: LogLevel[] = ['debug', 'info', 'warn', 'error']
 
-const LEVEL_ORDER: Record<LogLevel, number> = {
-  debug: 10,
-  info: 20,
-  warn: 30,
-  error: 40
+// 文件大小阈值：5MB 触发轮转
+const MAX_SIZE = 5 * 1024 * 1024
+// 旧日志保留天数
+const RETAIN_DAYS = 14
+
+type LogMeta = Record<string, unknown>
+
+/** 日志格式化：[YYYY-MM-DD HH:mm:ss.SSS] [LEVEL] [scope] msg {meta JSON} */
+function formatLine(level: LogLevel, scope: string, msg: string, meta?: LogMeta): string {
+  const ts = timestamp()
+  const metaStr = meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : ''
+  return `[${ts}] [${level.toUpperCase()}] [${scope}] ${msg}${metaStr}`
 }
 
+/** 生成 YYYY-MM-DD HH:mm:ss.SSS 格式时间戳 */
+function timestamp(): string {
+  const d = new Date()
+  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`
+  return `${date} ${time}`
+}
+
+/** 生成 YYYY-MM-DD 格式日期字符串（用于日志文件名） */
+function todayStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function pad(n: number, len = 2): string {
+  return String(n).padStart(len, '0')
+}
+
+/** 日志目录路径：userData/logs */
+function logsDir(): string {
+  return join(app.getPath('userData'), 'logs')
+}
+
+/** 当天日志文件路径 */
+function currentLogFile(): string {
+  return join(logsDir(), `workbench-${todayStr()}.log`)
+}
+
+/** 文件日志器：按级别写入文件并同步输出到控制台 */
 class Logger {
-  private logDir: string
-  private currentLevel: LogLevel = 'info'
-  private maxFileSize = 5 * 1024 * 1024 // 5MB 单文件上限
-  private keepDays = 14
+  private level: LogLevel
 
-  constructor() {
-    this.logDir = join(app.getPath('userData'), 'logs')
-    if (!existsSync(this.logDir)) mkdirSync(this.logDir, { recursive: true })
+  constructor(level: LogLevel) {
+    this.level = level
   }
 
+  /** 动态调整日志级别 */
   setLevel(level: LogLevel): void {
-    this.currentLevel = level
+    this.level = level
   }
 
-  private getLogFile(): string {
-    const today = new Date().toISOString().slice(0, 10)
-    return join(this.logDir, `workbench-${today}.log`)
+  debug(scope: string, msg: string, meta?: LogMeta): void {
+    this.write('debug', scope, msg, meta)
   }
 
-  private rotateIfNeeded(file: string): void {
-    try {
-      if (!existsSync(file)) return
-      const stat = statSync(file)
-      if (stat.size >= this.maxFileSize) {
-        const rotated = file.replace(/\.log$/, `-${Date.now()}.log`)
-        renameSync(file, rotated)
-      }
-    } catch {
-      // 轮转失败不影响主流程
+  info(scope: string, msg: string, meta?: LogMeta): void {
+    this.write('info', scope, msg, meta)
+  }
+
+  warn(scope: string, msg: string, meta?: LogMeta): void {
+    this.write('warn', scope, msg, meta)
+  }
+
+  error(scope: string, msg: string, meta?: LogMeta): void {
+    this.write('error', scope, msg, meta)
+  }
+
+  private shouldLog(level: LogLevel): boolean {
+    return LEVEL_ORDER.indexOf(level) >= LEVEL_ORDER.indexOf(this.level)
+  }
+
+  private write(level: LogLevel, scope: string, msg: string, meta?: LogMeta): void {
+    if (!this.shouldLog(level)) return
+    const line = formatLine(level, scope, msg, meta)
+    // 同步输出到控制台
+    if (level === 'error') {
+      console.error(line)
+    } else if (level === 'warn') {
+      console.warn(line)
+    } else {
+      console.log(line)
     }
-  }
-
-  private write(level: LogLevel, tag: string, msg: string, extra?: unknown): void {
-    if (LEVEL_ORDER[level] < LEVEL_ORDER[this.currentLevel]) return
-    const time = new Date().toISOString()
-    const line =
-      `[${time}] [${level.toUpperCase()}] [${tag}] ${msg}` +
-      (extra !== undefined ? ` ${safeStringify(extra)}` : '') +
-      '\n'
-    const file = this.getLogFile()
-    this.rotateIfNeeded(file)
+    // 写入文件
     try {
-      appendFileSync(file, line, 'utf-8')
-    } catch {
-      // 写入失败不可恢复，静默
-    }
-    // 同步输出到控制台（开发可见）
-    const consoleFn =
-      level === 'error' ? console.error : level === 'warn' ? console.warn : console.log
-    consoleFn(line.trimEnd())
-  }
-
-  debug(tag: string, msg: string, extra?: unknown): void {
-    this.write('debug', tag, msg, extra)
-  }
-  info(tag: string, msg: string, extra?: unknown): void {
-    this.write('info', tag, msg, extra)
-  }
-  warn(tag: string, msg: string, extra?: unknown): void {
-    this.write('warn', tag, msg, extra)
-  }
-  error(tag: string, msg: string, extra?: unknown): void {
-    this.write('error', tag, msg, extra)
-  }
-
-  /** 清理过期日志文件 */
-  purgeOldLogs(): void {
-    try {
-      const files = readdirSync(this.logDir).filter((f) => f.endsWith('.log'))
-      const cutoff = Date.now() - this.keepDays * 24 * 3_600_000
-      for (const f of files) {
-        const full = join(this.logDir, f)
-        const stat = statSync(full)
-        if (stat.mtimeMs < cutoff) {
-          unlinkSync(full)
-        }
-      }
-    } catch {
-      // ignore
+      const filePath = currentLogFile()
+      appendFileSync(filePath, line + '\n', 'utf8')
+      rotateIfNeeded(filePath)
+    } catch (e) {
+      // 文件写入失败时仅打印控制台，避免影响主流程
+      console.error('日志写入文件失败', e)
     }
   }
 }
 
-function safeStringify(v: unknown): string {
-  if (v instanceof Error) {
-    return JSON.stringify({ name: v.name, message: v.message, stack: v.stack })
+/** 控制台兜底日志器：initLogger 之前使用，仅输出到 console，避免崩溃 */
+class ConsoleLogger {
+  debug(scope: string, msg: string, meta?: LogMeta): void {
+    console.log(formatLine('debug', scope, msg, meta))
   }
+
+  info(scope: string, msg: string, meta?: LogMeta): void {
+    console.log(formatLine('info', scope, msg, meta))
+  }
+
+  warn(scope: string, msg: string, meta?: LogMeta): void {
+    console.warn(formatLine('warn', scope, msg, meta))
+  }
+
+  error(scope: string, msg: string, meta?: LogMeta): void {
+    console.error(formatLine('error', scope, msg, meta))
+  }
+}
+
+/** 文件轮转：超过 5MB 则重命名为 .1.log（先删除已有的 .1.log） */
+function rotateIfNeeded(filePath: string): void {
   try {
-    return JSON.stringify(v)
+    const stat = statSync(filePath)
+    if (stat.size <= MAX_SIZE) return
+    const rotated = filePath.replace(/\.log$/, '.1.log')
+    if (existsSync(rotated)) {
+      unlinkSync(rotated)
+    }
+    renameSync(filePath, rotated)
   } catch {
-    return String(v)
+    // 轮转失败忽略，下次写入会重新尝试
   }
 }
 
-// 延迟初始化：app.getPath('userData') 必须在 app ready 后才能调用
-let _logger: Logger | null = null
-
-export function initLogger(level: LogLevel = 'info'): Logger {
-  if (!_logger) {
-    _logger = new Logger()
+/** 清理 14 天前的 .log 文件 */
+function purgeOldLogs(): void {
+  const dir = logsDir()
+  if (!existsSync(dir)) return
+  const cutoff = Date.now() - RETAIN_DAYS * 24 * 3_600_000
+  let files: string[]
+  try {
+    files = readdirSync(dir)
+  } catch {
+    return
   }
-  _logger.setLevel(level)
-  _logger.purgeOldLogs()
-  return _logger
+  for (const f of files) {
+    if (!f.endsWith('.log')) continue
+    const full = join(dir, f)
+    try {
+      const stat = statSync(full)
+      if (stat.mtimeMs < cutoff) {
+        unlinkSync(full)
+      }
+    } catch {
+      // 单个文件清理失败忽略
+    }
+  }
 }
 
-export function getLogger(): Logger {
-  if (!_logger) {
-    // 兜底：在 initLogger 之前使用
-    _logger = initLogger('info')
-  }
-  return _logger
+// 单例实例：未初始化时为 null，getLogger 返回控制台兜底日志器
+let loggerInstance: Logger | null = null
+const fallbackLogger = new ConsoleLogger()
+
+/** 初始化日志器：创建日志目录、清理旧日志、设置级别 */
+export function initLogger(level: LogLevel): Logger {
+  mkdirSync(logsDir(), { recursive: true })
+  purgeOldLogs()
+  loggerInstance = new Logger(level)
+  return loggerInstance
+}
+
+/** 获取日志器实例；initLogger 之前调用返回控制台兜底日志器 */
+export function getLogger(): Logger | ConsoleLogger {
+  return loggerInstance ?? fallbackLogger
 }

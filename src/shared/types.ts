@@ -109,7 +109,6 @@ export interface Lesson {
   id: ID
   classId: ID
   className?: string
-  classType?: ClassType
   startTime: string
   endTime: string
   ideaVersionId?: string | null
@@ -192,25 +191,6 @@ export interface Feedback {
   createdAt: string
 }
 
-// ============ 反馈模板 ============
-export type FeedbackTemplateCategory = 'general' | 'praise' | 'suggestion' | 'progress' | 'custom'
-export interface FeedbackTemplate {
-  id: ID
-  name: string
-  category: FeedbackTemplateCategory
-  content: string
-  isBuiltin: boolean
-  sortOrder?: number
-  createdAt: string
-  updatedAt: string
-}
-export interface FeedbackTemplateInput {
-  name: string
-  category?: FeedbackTemplateCategory
-  content: string
-  sortOrder?: number
-}
-
 // ============ AI ============
 export interface AISettings {
   apiKey: string
@@ -273,12 +253,33 @@ export interface DashboardData {
 }
 
 export interface DashboardCharts {
-  /** 本周每日课时数（索引 0=周一 ... 6=周日） */
   weekdayLessonCounts: number[]
-  /** 班级学生数分布 */
   classStudentCounts: Array<{ name: string; count: number; type: ClassType }>
-  /** 反馈状态统计 */
   feedbackStats: { draft: number; published: number }
+}
+
+// ============ 反馈模板 ============
+export type FeedbackTemplateCategory =
+  | 'general'
+  | 'praise'
+  | 'suggestion'
+  | 'progress'
+  | 'custom'
+export interface FeedbackTemplate {
+  id: ID
+  name: string
+  category: FeedbackTemplateCategory
+  content: string
+  isBuiltin: boolean
+  sortOrder?: number
+  createdAt: string
+  updatedAt: string
+}
+export interface FeedbackTemplateInput {
+  name: string
+  category?: FeedbackTemplateCategory
+  content: string
+  sortOrder?: number
 }
 
 // ============ 学生学习历史 ============
