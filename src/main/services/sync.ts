@@ -6,6 +6,15 @@ import * as ideaRepo from '../database/repositories/ideas'
 import * as lessonRepo from '../database/repositories/lessons'
 import type { SyncSettings } from '@shared/types'
 
+/** 同步状态事件载荷，对应渲染进程的 sync:status 事件 */
+export interface SyncStatus {
+  running: boolean
+  message: string
+}
+
+/** 同步过程中的状态回调，可选；用于向渲染进程推送实时进度 */
+export type SyncStatusCallback = (status: SyncStatus) => void
+
 interface SyncHttpOptions {
   method: 'GET' | 'POST'
   headers?: Record<string, string>
@@ -39,21 +48,30 @@ function getDeviceId(): string {
 }
 
 /** 测试同步服务器连通性 */
-export async function testConnection(): Promise<{ ok: boolean; message: string }> {
+export async function testConnection(
+  onStatus?: SyncStatusCallback
+): Promise<{ ok: boolean; message: string }> {
   const s = getSync()
   if (!s.serverUrl) return { ok: false, message: '未配置服务器地址' }
+  onStatus?.({ running: true, message: '正在测试连接...' })
   try {
     const resp = await syncFetch('/health', { method: 'GET', timeoutMs: 8000 })
-    return { ok: resp.ok, message: resp.ok ? '服务器连接正常' : `服务器返回 ${resp.status}` }
+    const ok = resp.ok
+    const msg = ok ? '服务器连接正常' : `服务器返回 ${resp.status}`
+    onStatus?.({ running: false, message: msg })
+    return { ok, message: msg }
   } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    const msg = e instanceof Error ? e.message : String(e)
+    onStatus?.({ running: false, message: `连接失败：${msg}` })
+    return { ok: false, message: msg }
   }
 }
 
 /** 推送本地变更（整库快照 JSON 推送，作为增量同步的基础实现） */
-export async function push(): Promise<{ ok: boolean; message: string }> {
+export async function push(onStatus?: SyncStatusCallback): Promise<{ ok: boolean; message: string }> {
   const s = getSync()
   if (!s.enabled || !s.serverUrl) return { ok: false, message: '同步未启用' }
+  onStatus?.({ running: true, message: '正在推送本地数据...' })
   try {
     const snapshot = buildSnapshot()
     const resp = await syncFetch('/sync/push', {
@@ -62,21 +80,27 @@ export async function push(): Promise<{ ok: boolean; message: string }> {
     })
     if (!resp.ok) {
       const detail = await safeText(resp)
-      return { ok: false, message: `推送失败 ${resp.status}${detail ? `: ${detail}` : ''}` }
+      const msg = `推送失败 ${resp.status}${detail ? `: ${detail}` : ''}`
+      onStatus?.({ running: false, message: msg })
+      return { ok: false, message: msg }
     }
     const next: SyncSettings = { ...s, lastSyncAt: new Date().toISOString() }
     setSync(next)
+    onStatus?.({ running: false, message: '推送成功' })
     return { ok: true, message: '推送成功' }
   } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    const msg = e instanceof Error ? e.message : String(e)
+    onStatus?.({ running: false, message: `推送失败：${msg}` })
+    return { ok: false, message: msg }
   }
 }
 
 /** 拉取其他设备变更并合并。
  * 服务端返回最新快照时整体 upsert 合并；无快照（204）视为无变更。 */
-export async function pull(): Promise<{ ok: boolean; message: string }> {
+export async function pull(onStatus?: SyncStatusCallback): Promise<{ ok: boolean; message: string }> {
   const s = getSync()
   if (!s.enabled || !s.serverUrl) return { ok: false, message: '同步未启用' }
+  onStatus?.({ running: true, message: '正在拉取远端数据...' })
   try {
     const since = s.lastSyncAt ?? ''
     const resp = await syncFetch(`/sync/pull${since ? `?since=${encodeURIComponent(since)}` : ''}`, {
@@ -84,11 +108,14 @@ export async function pull(): Promise<{ ok: boolean; message: string }> {
     })
     if (resp.status === 204) {
       // 无新变更
+      onStatus?.({ running: false, message: '已是最新' })
       return { ok: true, message: '已是最新' }
     }
     if (!resp.ok) {
       const detail = await safeText(resp)
-      return { ok: false, message: `拉取失败 ${resp.status}${detail ? `: ${detail}` : ''}` }
+      const msg = `拉取失败 ${resp.status}${detail ? `: ${detail}` : ''}`
+      onStatus?.({ running: false, message: msg })
+      return { ok: false, message: msg }
     }
     const data = (await resp.json()) as { snapshot?: SnapshotPayload } | null
     if (data?.snapshot) {
@@ -96,27 +123,36 @@ export async function pull(): Promise<{ ok: boolean; message: string }> {
     }
     const next: SyncSettings = { ...s, lastSyncAt: new Date().toISOString() }
     setSync(next)
+    onStatus?.({ running: false, message: '拉取成功' })
     return { ok: true, message: '拉取成功' }
   } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : String(e) }
+    const msg = e instanceof Error ? e.message : String(e)
+    onStatus?.({ running: false, message: `拉取失败：${msg}` })
+    return { ok: false, message: msg }
   }
 }
 
 /** 立即执行一次同步：先拉取后推送；两者都成功才算成功 */
-export async function syncNow(): Promise<{ ok: boolean; message: string }> {
-  const pullRes = await pull()
-  const pushRes = await push()
+export async function syncNow(onStatus?: SyncStatusCallback): Promise<{ ok: boolean; message: string }> {
+  onStatus?.({ running: true, message: '开始同步...' })
+  const pullRes = await pull(onStatus)
+  const pushRes = await push(onStatus)
   if (pullRes.ok && pushRes.ok) {
-    return { ok: true, message: `同步完成（${pullRes.message} / ${pushRes.message}）` }
+    const msg = `同步完成（${pullRes.message} / ${pushRes.message}）`
+    onStatus?.({ running: false, message: '同步完成' })
+    return { ok: true, message: msg }
   }
   // 部分成功时返回失败方信息，便于排查
+  let msg: string
   if (!pullRes.ok && !pushRes.ok) {
-    return { ok: false, message: `同步失败（拉取：${pullRes.message}；推送：${pushRes.message}）` }
+    msg = `同步失败（拉取：${pullRes.message}；推送：${pushRes.message}）`
+  } else if (!pullRes.ok) {
+    msg = `拉取失败：${pullRes.message}（推送已成功）`
+  } else {
+    msg = `推送失败：${pushRes.message}（拉取已成功）`
   }
-  if (!pullRes.ok) {
-    return { ok: false, message: `拉取失败：${pullRes.message}（推送已成功）` }
-  }
-  return { ok: false, message: `推送失败：${pushRes.message}（拉取已成功）` }
+  onStatus?.({ running: false, message: msg })
+  return { ok: false, message: msg }
 }
 
 interface SnapshotPayload {

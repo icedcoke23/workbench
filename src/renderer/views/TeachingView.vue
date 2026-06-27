@@ -28,9 +28,22 @@
       </a-card>
 
       <a-card :bordered="false" style="margin-top: 16px">
+        <template #title>
+          <span class="lesson-list-title">当日课次</span>
+        </template>
+        <template #extra>
+          <a-button
+            size="small"
+            type="primary"
+            :disabled="!selectedClassId"
+            @click="openCreateLesson"
+          >
+            <PlusOutlined /> 新增课次
+          </a-button>
+        </template>
         <a-empty v-if="!selectedClassId" description="请选择班级查看当日课次" />
         <div v-else-if="lessonLoading" class="loading-wrap"><a-spin /></div>
-        <a-empty v-else-if="lessons.length === 0" description="该日期暂无课次，可切换日期查看" />
+        <a-empty v-else-if="lessons.length === 0" description="该日期暂无课次，可点击「新增课次」添加" />
         <a-row v-else :gutter="[16, 16]">
           <a-col v-for="l in lessons" :key="l.id" :xs="24" :sm="12" :md="8" :lg="6">
             <a-card
@@ -47,16 +60,28 @@
               <div class="lesson-status">
                 <a-tag :color="statusColor(l.status)">{{ statusText(l.status) }}</a-tag>
               </div>
-              <div v-if="l.status !== 'finished'" class="lesson-action">
+              <div class="lesson-card-actions" @click.stop>
                 <a-button
+                  v-if="l.status !== 'finished'"
                   type="primary"
                   size="small"
                   block
                   :ghost="l.status === 'teaching'"
-                  @click.stop="startTeaching(l)"
+                  @click="startTeaching(l)"
                 >
                   {{ l.status === 'teaching' ? '继续上课' : '一键上课' }}
                 </a-button>
+                <a-space :size="4" class="lesson-edit-actions">
+                  <a-button size="small" @click="openEditLesson(l)">
+                    <EditOutlined /> 编辑
+                  </a-button>
+                  <a-popconfirm
+                    title="确认删除该课次？相关课堂记录也将删除。"
+                    @confirm="removeLesson(l.id)"
+                  >
+                    <a-button size="small" danger><DeleteOutlined /></a-button>
+                  </a-popconfirm>
+                </a-space>
               </div>
             </a-card>
           </a-col>
@@ -176,11 +201,65 @@
         </a-col>
       </a-row>
     </template>
+
+    <!-- ============ 新建/编辑课次 Modal ============ -->
+    <a-modal
+      v-model:open="lessonModalVisible"
+      :title="editingLessonId ? '编辑课次' : '新增课次'"
+      :confirm-loading="lessonSubmitting"
+      @ok="submitLesson"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="班级" required>
+          <a-select
+            v-model:value="lessonForm.classId"
+            placeholder="选择班级"
+            :options="classOptions"
+            show-search
+            option-filter-prop="label"
+          />
+        </a-form-item>
+        <a-form-item label="日期" required>
+          <a-date-picker
+            v-model:value="lessonForm.date"
+            style="width: 100%"
+            placeholder="选择日期"
+          />
+        </a-form-item>
+        <a-row :gutter="12">
+          <a-col :span="12">
+            <a-form-item label="开始时间" required>
+              <a-time-picker
+                v-model:value="lessonForm.startTime"
+                style="width: 100%"
+                format="HH:mm"
+                value-format="HH:mm"
+                placeholder="09:00"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="结束时间" required>
+              <a-time-picker
+                v-model:value="lessonForm.endTime"
+                style="width: 100%"
+                format="HH:mm"
+                value-format="HH:mm"
+                placeholder="10:30"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="科目">
+          <a-input v-model:value="lessonForm.subject" placeholder="如：Scratch 图形编程" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, onDeactivated, onActivated, defineComponent, h, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, onDeactivated, onActivated, defineComponent, h, watch, reactive } from 'vue'
 import { message, Modal, Button as AButton, InputNumber as AInputNumber } from 'ant-design-vue'
 import {
   PlayCircleOutlined,
@@ -188,11 +267,14 @@ import {
   CloseOutlined,
   ThunderboltOutlined,
   ClockCircleOutlined,
-  CodeOutlined
+  CodeOutlined,
+  PlusOutlined,
+  EditOutlined,
+  DeleteOutlined
 } from '@ant-design/icons-vue'
 import { call } from '@renderer/api'
 import { subscribeRefresh } from '@renderer/composables/useShortcuts'
-import type { ClassInfo, Lesson, Student } from '@shared/types'
+import type { ClassInfo, Lesson, LessonInput, Student } from '@shared/types'
 import dayjs from 'dayjs'
 
 // ============ 可视化计时器子组件（同文件内定义） ============
@@ -406,6 +488,22 @@ const pickedId = ref<string | null>(null)
 const pickResult = ref<Student | null>(null)
 const currentNote = ref('')
 
+// 课次手动管理 Modal 状态
+const lessonModalVisible = ref(false)
+const lessonSubmitting = ref(false)
+const editingLessonId = ref<string | null>(null)
+const lessonForm = reactive({
+  classId: '' as string,
+  date: dayjs() as dayjs.Dayjs,
+  startTime: '09:00' as string,
+  endTime: '10:30' as string,
+  subject: '' as string
+})
+
+const classOptions = computed(() =>
+  classes.value.map((c) => ({ label: c.name, value: c.id }))
+)
+
 const currentClassName = computed(
   () =>
     classes.value.find((c) => c.id === selectedClassId.value)?.name ||
@@ -444,6 +542,81 @@ async function loadLessons(): Promise<void> {
     lessons.value = []
   } finally {
     lessonLoading.value = false
+  }
+}
+
+// ============ 课次手动管理 ============
+/** 将日期 + HH:mm 组合为 ISO 字符 */
+function combineDateTime(date: dayjs.Dayjs, hhmm: string): string {
+  const [h, m] = hhmm.split(':').map((v) => parseInt(v, 10))
+  return date.hour(h || 0).minute(m || 0).second(0).millisecond(0).toISOString()
+}
+
+function openCreateLesson(): void {
+  editingLessonId.value = null
+  lessonForm.classId = selectedClassId.value ?? ''
+  lessonForm.date = selectedDate.value ?? dayjs()
+  lessonForm.startTime = '09:00'
+  lessonForm.endTime = '10:30'
+  lessonForm.subject = ''
+  lessonModalVisible.value = true
+}
+
+function openEditLesson(l: Lesson): void {
+  editingLessonId.value = l.id
+  const start = dayjs(l.startTime)
+  const end = dayjs(l.endTime)
+  lessonForm.classId = l.classId
+  lessonForm.date = start
+  lessonForm.startTime = start.format('HH:mm')
+  lessonForm.endTime = end.format('HH:mm')
+  lessonForm.subject = l.subject ?? ''
+  lessonModalVisible.value = true
+}
+
+async function submitLesson(): Promise<void> {
+  if (!lessonForm.classId) {
+    message.warning('请选择班级')
+    return
+  }
+  if (!lessonForm.startTime || !lessonForm.endTime) {
+    message.warning('请填写开始与结束时间')
+    return
+  }
+  lessonSubmitting.value = true
+  try {
+    const payload: LessonInput = {
+      classId: lessonForm.classId,
+      startTime: combineDateTime(lessonForm.date, lessonForm.startTime),
+      endTime: combineDateTime(lessonForm.date, lessonForm.endTime),
+      subject: lessonForm.subject.trim() || undefined
+    }
+    if (editingLessonId.value) {
+      await call(window.api.lesson.update(editingLessonId.value, payload))
+      message.success('课次已更新')
+    } else {
+      await call(window.api.lesson.create(payload))
+      message.success('课次已创建')
+    }
+    lessonModalVisible.value = false
+    // 创建/编辑后切换到对应班级与日期并刷新
+    selectedClassId.value = lessonForm.classId
+    selectedDate.value = lessonForm.date
+    await loadLessons()
+  } catch (e) {
+    message.error(`${editingLessonId.value ? '更新' : '创建'}失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    lessonSubmitting.value = false
+  }
+}
+
+async function removeLesson(id: string): Promise<void> {
+  try {
+    await call(window.api.lesson.remove(id))
+    message.success('课次已删除')
+    await loadLessons()
+  } catch (e) {
+    message.error(String(e))
   }
 }
 
@@ -629,6 +802,19 @@ onUnmounted(() => {
 }
 .lesson-status {
   margin-bottom: 8px;
+}
+.lesson-list-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.lesson-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lesson-edit-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 .teaching-header {
   margin-bottom: 16px;

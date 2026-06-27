@@ -95,6 +95,17 @@
                 立即同步
               </a-button>
             </div>
+            <a-alert
+              v-if="syncStatus"
+              class="sync-status"
+              :type="syncStatus.running ? 'info' : syncStatus.ok ? 'success' : 'error'"
+              :show-icon="true"
+              :message="syncStatus.message"
+            >
+              <template #icon>
+                <LoadingOutlined v-if="syncStatus.running" spin />
+              </template>
+            </a-alert>
           </a-card>
         </a-tab-pane>
 
@@ -229,7 +240,8 @@ import {
   SyncOutlined,
   DownloadOutlined,
   UploadOutlined,
-  ExclamationCircleOutlined
+  ExclamationCircleOutlined,
+  LoadingOutlined
 } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { call } from '@renderer/api'
@@ -257,8 +269,7 @@ const ai = reactive<AISettings>({
   apiKey: '',
   modelId: '',
   visionModelId: '',
-  systemPrompt: '',
-  maxConcurrent: 1
+  systemPrompt: ''
 })
 
 const sync = reactive<SyncSettings>({
@@ -289,6 +300,9 @@ const savingScratch = ref(false)
 const testingAi = ref(false)
 const testingSync = ref(false)
 const syncing = ref(false)
+
+// 同步实时状态：来自主进程的 sync:status 事件
+const syncStatus = ref<{ running: boolean; message: string; ok?: boolean } | null>(null)
 
 function applySettings(s: AppSettings): void {
   Object.assign(ai, s.ai)
@@ -352,6 +366,10 @@ async function testSync(): Promise<void> {
     const res = await call(window.api.settings.testSync())
     if (res.ok) message.success(res.message || '连接成功')
     else message.warning(res.message || '连接失败')
+    // 用最终结果修正状态条颜色
+    if (syncStatus.value && !syncStatus.value.running) {
+      syncStatus.value = { ...syncStatus.value, ok: res.ok }
+    }
   } catch (e) {
     message.error(String(e))
   } finally {
@@ -365,6 +383,10 @@ async function syncNow(): Promise<void> {
     const res = await call(window.api.settings.syncNow())
     if (res.ok) message.success(res.message || '同步完成')
     else message.warning(res.message || '同步失败')
+    // 用最终结果修正状态条颜色
+    if (syncStatus.value && !syncStatus.value.running) {
+      syncStatus.value = { ...syncStatus.value, ok: res.ok }
+    }
     // 同步后刷新 lastSyncAt
     try {
       const s = await call(window.api.settings.get())
@@ -464,16 +486,27 @@ function handleBackupAction(e: Event): void {
 }
 
 let offRefresh: (() => void) | null = null
+let offSyncStatus: (() => void) | null = null
 onMounted(() => {
   load()
   // 订阅全局刷新事件
   offRefresh = subscribeRefresh(load)
+  // 订阅同步状态事件，实时展示同步进度
+  offSyncStatus = window.events['sync:status']((status: { running: boolean; message: string }) => {
+    syncStatus.value = { ...status, ok: syncStatus.value?.ok }
+    if (status.running) {
+      // 进行中时重置 ok，避免残留旧状态影响颜色
+      syncStatus.value = { ...status, ok: undefined }
+    }
+  })
   // 监听快捷键触发的备份动作
   window.addEventListener('workbench:goto-backup', handleBackupAction)
 })
 onUnmounted(() => {
   offRefresh?.()
   offRefresh = null
+  offSyncStatus?.()
+  offSyncStatus = null
   window.removeEventListener('workbench:goto-backup', handleBackupAction)
 })
 </script>
@@ -512,5 +545,8 @@ onUnmounted(() => {
   padding: 6px 8px;
   border-radius: 4px;
   border: 1px solid #eef0f4;
+}
+.sync-status {
+  margin-top: 12px;
 }
 </style>

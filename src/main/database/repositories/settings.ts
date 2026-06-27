@@ -16,8 +16,7 @@ const DEFAULT_AI: AISettings = {
   modelId: 'glm-4-flash',
   visionModelId: 'glm-4v-flash',
   systemPrompt: '',
-  useCustomAI: false,
-  maxConcurrent: 5
+  useCustomAI: false
 }
 
 const DEFAULT_SYNC: SyncSettings = {

@@ -33,6 +33,9 @@
               </template>
               <template #extra>
                 <a-space :size="6">
+                  <a-button size="small" @click="openEditIdeaModal(item)">
+                    <EditOutlined /> 编辑
+                  </a-button>
                   <a-button size="small" @click="openNewVersionModal(item)">
                     <PlusCircleOutlined /> 新建版本
                   </a-button>
@@ -227,10 +230,10 @@
       </a-tab-pane>
     </a-tabs>
 
-    <!-- ============ 新建点子 Modal ============ -->
+    <!-- ============ 新建/编辑点子 Modal ============ -->
     <a-modal
       v-model:open="newIdeaModalVisible"
-      title="新建点子"
+      :title="editingIdeaId ? '编辑点子' : '新建点子'"
       :confirm-loading="newIdeaSubmitting"
       @ok="submitNewIdea"
     >
@@ -446,9 +449,10 @@ async function removeVersion(versionId: string): Promise<void> {
   }
 }
 
-// 新建点子
+// 新建/编辑点子
 const newIdeaModalVisible = ref(false)
 const newIdeaSubmitting = ref(false)
+const editingIdeaId = ref<string | null>(null)
 const newIdeaForm = reactive({
   title: '',
   targetCourse: '',
@@ -457,10 +461,20 @@ const newIdeaForm = reactive({
 })
 
 function openNewIdeaModal(): void {
+  editingIdeaId.value = null
   newIdeaForm.title = ''
   newIdeaForm.targetCourse = ''
   newIdeaForm.description = ''
   newIdeaForm.status = 'idea'
+  newIdeaModalVisible.value = true
+}
+
+function openEditIdeaModal(idea: Idea): void {
+  editingIdeaId.value = idea.id
+  newIdeaForm.title = idea.title
+  newIdeaForm.targetCourse = idea.targetCourse ?? ''
+  newIdeaForm.description = idea.description ?? ''
+  newIdeaForm.status = idea.status
   newIdeaModalVisible.value = true
 }
 
@@ -471,19 +485,23 @@ async function submitNewIdea(): Promise<void> {
   }
   newIdeaSubmitting.value = true
   try {
-    await call(
-      window.api.idea.create({
-        title: newIdeaForm.title.trim(),
-        targetCourse: newIdeaForm.targetCourse.trim() || undefined,
-        description: newIdeaForm.description.trim() || undefined,
-        status: newIdeaForm.status
-      })
-    )
-    message.success('点子已创建')
+    const payload = {
+      title: newIdeaForm.title.trim(),
+      targetCourse: newIdeaForm.targetCourse.trim() || undefined,
+      description: newIdeaForm.description.trim() || undefined,
+      status: newIdeaForm.status
+    }
+    if (editingIdeaId.value) {
+      await call(window.api.idea.update(editingIdeaId.value, payload))
+      message.success('点子已更新')
+    } else {
+      await call(window.api.idea.create(payload))
+      message.success('点子已创建')
+    }
     newIdeaModalVisible.value = false
     await loadIdeas()
   } catch (e) {
-    message.error(`创建失败：${String(e instanceof Error ? e.message : e)}`)
+    message.error(`${editingIdeaId.value ? '更新' : '创建'}失败：${String(e instanceof Error ? e.message : e)}`)
   } finally {
     newIdeaSubmitting.value = false
   }

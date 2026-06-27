@@ -200,7 +200,6 @@ export interface AISettings {
   visionModelId?: string
   systemPrompt: string
   useCustomAI: boolean
-  maxConcurrent?: number
 }
 export interface ScheduleParseResult {
   classes: Array<{

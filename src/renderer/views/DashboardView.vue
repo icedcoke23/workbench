@@ -215,6 +215,39 @@
       </div>
     </a-card>
 
+    <!-- 今日课程 -->
+    <a-card title="今日课程" class="section-card">
+      <template #extra>
+        <a-tag v-if="todayLessons.length > 0" color="processing">
+          今日 {{ todayLessons.length }} 节
+        </a-tag>
+      </template>
+      <a-empty v-if="todayLessons.length === 0" description="今日暂无课程" />
+      <div v-else class="today-lessons">
+        <div
+          v-for="lesson in todayLessons"
+          :key="lesson.id"
+          class="today-lesson-card"
+          :class="`status-${lesson.status}`"
+        >
+          <div class="today-lesson-time">
+            <div class="time-start">{{ formatTimeOnly(lesson.startTime) }}</div>
+            <div class="time-end">{{ formatTimeOnly(lesson.endTime) }}</div>
+          </div>
+          <div class="today-lesson-body">
+            <div class="today-lesson-class">{{ lesson.className || '未命名班级' }}</div>
+            <div class="today-lesson-meta">
+              <a-tag v-if="lesson.subject" color="blue" size="small">{{ lesson.subject }}</a-tag>
+              <a-tag v-if="lesson.status === 'teaching'" color="processing" size="small">授课中</a-tag>
+              <a-tag v-else-if="lesson.status === 'finished'" color="default" size="small">已结课</a-tag>
+              <a-tag v-else color="orange" size="small">待授课</a-tag>
+              <a-tag v-if="lesson.feedbackSent" color="green" size="small">已反馈</a-tag>
+            </div>
+          </div>
+        </div>
+      </div>
+    </a-card>
+
     <!-- 本周课程 -->
     <a-card title="本周课程" class="section-card">
       <a-empty v-if="weekLessons.length === 0" description="本周暂无课程" />
@@ -295,6 +328,7 @@ const stats = ref<DashboardData['stats']>({
 })
 const todos = ref<Todo[]>([])
 const weekLessons = ref<Lesson[]>([])
+const todayLessons = ref<Lesson[]>([])
 // 图表数据（本周课时分布、班级学生数分布、反馈状态）
 const charts = ref<DashboardCharts | null>(null)
 
@@ -359,6 +393,9 @@ function formatLessonTime(s: string): string {
   const d = dayjs(s)
   return `${WEEKDAYS[d.day()] ?? ''} ${d.format('M月D日 HH:mm')}`
 }
+function formatTimeOnly(s: string): string {
+  return dayjs(s).format('HH:mm')
+}
 function lessonColor(lesson: Lesson): string {
   if (lesson.feedbackSent) return 'green'
   if (lesson.status === 'finished') return 'orange'
@@ -420,6 +457,7 @@ async function loadDashboard(): Promise<void> {
     stats.value = data.stats
     todos.value = data.todos ?? []
     weekLessons.value = data.weekLessons ?? []
+    todayLessons.value = data.todayLessons ?? []
     charts.value = data.charts ?? null
   } catch (e) {
     message.error(String(e))
@@ -727,6 +765,73 @@ onUnmounted(() => {
 }
 .lesson-class {
   color: #4b5563;
+}
+/* ============ 今日课程卡片 ============ */
+.today-lessons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.today-lesson-card {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f9fafb;
+  border-left: 3px solid #d1d5db;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.today-lesson-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+.today-lesson-card.status-teaching {
+  border-left-color: #1677ff;
+  background: #eff6ff;
+}
+.today-lesson-card.status-finished {
+  border-left-color: #9ca3af;
+  background: #f3f4f6;
+}
+.today-lesson-card.status-pending {
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+}
+.today-lesson-time {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 44px;
+}
+.time-start {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.2;
+}
+.time-end {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+.today-lesson-body {
+  flex: 1;
+  min-width: 0;
+}
+.today-lesson-class {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.today-lesson-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 /* ============ 图表样式 ============ */
 .chart-row {

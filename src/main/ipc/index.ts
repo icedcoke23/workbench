@@ -204,8 +204,18 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       }
     })
   )
-  ipcMain.handle('settings:testSync', async () => tryRunAsync(() => syncService.testConnection()))
-  ipcMain.handle('settings:syncNow', async () => tryRunAsync(() => syncService.syncNow()))
+  ipcMain.handle('settings:testSync', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender) ?? getMainWindow()
+    return tryRunAsync(() =>
+      syncService.testConnection((status) => win?.webContents.send('sync:status', status))
+    )
+  })
+  ipcMain.handle('settings:syncNow', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender) ?? getMainWindow()
+    return tryRunAsync(() =>
+      syncService.syncNow((status) => win?.webContents.send('sync:status', status))
+    )
+  })
 
   // ============ 仪表盘 ============
   ipcMain.handle('dashboard:get', () => tryRun(() => todoService.buildDashboard()))
