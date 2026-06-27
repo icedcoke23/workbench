@@ -1,4 +1,5 @@
 import { db, uuid } from '../db'
+import { existsSync, unlinkSync } from 'fs'
 import type { Idea, IdeaInput, IdeaVersion, IdeaVersionInput } from '@shared/types'
 
 interface IdeaRow {
@@ -80,6 +81,8 @@ export function update(id: string, input: Partial<IdeaInput>): Idea | null {
 }
 
 export function remove(id: string): void {
+  // 先清理该点子下所有版本的物理文件（外键 CASCADE 仅删除数据库行，不删文件）
+  cleanupVersionFilesByIdea(id)
   db().prepare(`DELETE FROM ideas WHERE id = ?`).run(id)
 }
 
@@ -97,6 +100,54 @@ export function getVersion(id: string): IdeaVersion | null {
   return row ? mapVersion(row) : null
 }
 
+/** 更新版本：仅允许修改版本名与备注，文件路径由保存流程管理 */
+export function updateVersion(
+  id: string,
+  input: Partial<Pick<IdeaVersionInput, 'versionName' | 'notes'>>
+): IdeaVersion | null {
+  const cur = getVersion(id)
+  if (!cur) return null
+  db()
+    .prepare(`UPDATE idea_versions SET version_name = ?, notes = ? WHERE id = ?`)
+    .run(
+      input.versionName ?? cur.versionName,
+      input.notes !== undefined ? input.notes : cur.notes ?? null,
+      id
+    )
+  return getVersion(id)
+}
+
 export function removeVersion(id: string): void {
+  // 先清理该版本对应的 .sb3 物理文件，再删除数据库行
+  cleanupVersionFile(id)
   db().prepare(`DELETE FROM idea_versions WHERE id = ?`).run(id)
+}
+
+/** 尽力删除单个版本对应的物理文件；文件不存在或删除失败均不影响数据库操作 */
+function cleanupVersionFile(versionId: string): void {
+  const row = db()
+    .prepare(`SELECT file_path FROM idea_versions WHERE id = ?`)
+    .get(versionId) as { file_path: string | null } | undefined
+  const p = row?.file_path
+  if (!p) return
+  try {
+    if (existsSync(p)) unlinkSync(p)
+  } catch (e) {
+    console.error('[ideas] 清理版本文件失败', p, e)
+  }
+}
+
+/** 尽力删除某点子下所有版本的物理文件（删除点子时调用） */
+function cleanupVersionFilesByIdea(ideaId: string): void {
+  const rows = db()
+    .prepare(`SELECT file_path FROM idea_versions WHERE idea_id = ?`)
+    .all(ideaId) as { file_path: string | null }[]
+  for (const r of rows) {
+    if (!r.file_path) continue
+    try {
+      if (existsSync(r.file_path)) unlinkSync(r.file_path)
+    } catch (e) {
+      console.error('[ideas] 清理版本文件失败', r.file_path, e)
+    }
+  }
 }

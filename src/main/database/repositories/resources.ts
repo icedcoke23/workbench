@@ -1,4 +1,5 @@
 import { db, parseJSON, stringifyJSON, uuid } from '../db'
+import { existsSync, unlinkSync } from 'fs'
 import type { Resource, ResourceInput } from '@shared/types'
 
 interface ResourceRow {
@@ -93,5 +94,17 @@ export function allTags(): string[] {
 }
 
 export function remove(id: string): void {
+  // 先清理物理文件，再删除数据库行；文件不存在或删除失败均不影响数据库操作
+  const row = db().prepare(`SELECT file_path FROM resources WHERE id = ?`).get(id) as
+    | { file_path: string }
+    | undefined
+  const p = row?.file_path
+  if (p) {
+    try {
+      if (existsSync(p)) unlinkSync(p)
+    } catch (e) {
+      console.error('[resources] 清理资源文件失败', p, e)
+    }
+  }
   db().prepare(`DELETE FROM resources WHERE id = ?`).run(id)
 }

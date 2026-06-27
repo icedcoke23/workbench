@@ -160,15 +160,35 @@ interface SnapshotPayload {
   classes?: unknown[]
   ideas?: unknown[]
   lessons?: unknown[]
+  /** 备课：点子版本（含 .sb3 文件路径，跨设备仅同步元数据） */
+  ideaVersions?: unknown[]
+  /** 备课：资源库（含素材文件路径，跨设备仅同步元数据） */
+  resources?: unknown[]
+  /** 备课：文档关联 */
+  docLinks?: unknown[]
 }
 
-// 本地快照构建（复用各仓库 list）
+/** 查询原始行（保留 snake_case 列名与 JSON 字符串原值），确保 upsert 列名匹配 */
+function listRaw(table: string): unknown[] {
+  return db().prepare(`SELECT * FROM ${table}`).all()
+}
+
+// 本地快照构建（students/classes/ideas/lessons 复用各仓库 list；备课三表取原始行保证列名一致）
 function buildSnapshot(): SnapshotPayload & { exportedAt: string } {
   const students = studentRepo.list()
   const classes = classRepo.list()
   const ideas = ideaRepo.list()
   const lessons = lessonRepo.list({})
-  return { students, classes, ideas, lessons, exportedAt: new Date().toISOString() }
+  return {
+    students,
+    classes,
+    ideas,
+    lessons,
+    ideaVersions: listRaw('idea_versions'),
+    resources: listRaw('resources'),
+    docLinks: listRaw('doc_links'),
+    exportedAt: new Date().toISOString()
+  }
 }
 
 /** 将拉取的快照合并到本地（upsert 语义，按 id 覆盖；不删除本地独有数据） */
@@ -203,6 +223,31 @@ function applySnapshot(snap: SnapshotPayload): void {
       'idea_version_id',
       'status',
       'feedback_sent',
+      'created_at'
+    ])
+    // 备课三表：版本需先于课次合并（lessons.idea_version_id 引用），资源与文档独立
+    upsertRows(conn, 'idea_versions', snap.ideaVersions, [
+      'id',
+      'idea_id',
+      'version_name',
+      'file_path',
+      'notes',
+      'created_at'
+    ])
+    upsertRows(conn, 'resources', snap.resources, [
+      'id',
+      'name',
+      'type',
+      'file_path',
+      'tags',
+      'class_id',
+      'created_at'
+    ])
+    upsertRows(conn, 'doc_links', snap.docLinks, [
+      'id',
+      'lesson_id',
+      'url',
+      'title',
       'created_at'
     ])
   })()

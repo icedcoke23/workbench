@@ -59,6 +59,9 @@
               <div class="lesson-subject">{{ l.subject || l.className || '未命名课次' }}</div>
               <div class="lesson-status">
                 <a-tag :color="statusColor(l.status)">{{ statusText(l.status) }}</a-tag>
+                <a-tag v-if="l.ideaTitle" color="purple" size="small">
+                  <BulbOutlined /> {{ l.ideaTitle }}
+                </a-tag>
               </div>
               <div class="lesson-card-actions" @click.stop>
                 <a-button
@@ -253,6 +256,28 @@
         <a-form-item label="科目">
           <a-input v-model:value="lessonForm.subject" placeholder="如：Scratch 图形编程" />
         </a-form-item>
+
+        <a-divider style="margin: 8px 0">关联备课（可选）</a-divider>
+        <a-form-item label="备课点子">
+          <a-select
+            v-model:value="lessonForm.ideaId"
+            placeholder="选择备课点子"
+            :options="ideaOptions"
+            show-search
+            option-filter-prop="label"
+            allow-clear
+            @change="onIdeaChange"
+          />
+        </a-form-item>
+        <a-form-item v-if="lessonForm.ideaId" label="作品版本">
+          <a-select
+            v-model:value="lessonForm.ideaVersionId"
+            placeholder="选择该点子的作品版本"
+            :options="versionOptions"
+            :not-found-content="versionOptions.length === 0 ? '该点子暂无版本' : undefined"
+            allow-clear
+          />
+        </a-form-item>
       </a-form>
     </a-modal>
   </div>
@@ -270,11 +295,12 @@ import {
   CodeOutlined,
   PlusOutlined,
   EditOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  BulbOutlined
 } from '@ant-design/icons-vue'
 import { call } from '@renderer/api'
 import { subscribeRefresh } from '@renderer/composables/useShortcuts'
-import type { ClassInfo, Lesson, LessonInput, Student } from '@shared/types'
+import type { ClassInfo, Idea, Lesson, LessonInput, Student } from '@shared/types'
 import dayjs from 'dayjs'
 
 // ============ 可视化计时器子组件（同文件内定义） ============
@@ -497,12 +523,31 @@ const lessonForm = reactive({
   date: dayjs() as dayjs.Dayjs,
   startTime: '09:00' as string,
   endTime: '10:30' as string,
-  subject: '' as string
+  subject: '' as string,
+  ideaId: '' as string,
+  ideaVersionId: '' as string
 })
+
+// 备课点子与版本（用于课次关联备课成果）
+const ideas = ref<Idea[]>([])
 
 const classOptions = computed(() =>
   classes.value.map((c) => ({ label: c.name, value: c.id }))
 )
+
+const ideaOptions = computed(() =>
+  ideas.value.map((i) => ({ label: i.title, value: i.id }))
+)
+
+/** 当前选中的点子下的版本选项 */
+const versionOptions = computed(() => {
+  if (!lessonForm.ideaId) return []
+  const idea = ideas.value.find((i) => i.id === lessonForm.ideaId)
+  return (idea?.versions ?? []).map((v) => ({
+    label: v.versionName,
+    value: v.id
+  }))
+})
 
 const currentClassName = computed(
   () =>
@@ -545,11 +590,30 @@ async function loadLessons(): Promise<void> {
   }
 }
 
+/** 加载备课点子列表（含版本），供课次关联备课成果使用 */
+async function loadIdeas(): Promise<void> {
+  try {
+    ideas.value = await call(window.api.idea.list())
+  } catch (e) {
+    console.error('[teaching] 加载备课点子失败', e)
+    ideas.value = []
+  }
+}
+
 // ============ 课次手动管理 ============
 /** 将日期 + HH:mm 组合为 ISO 字符 */
 function combineDateTime(date: dayjs.Dayjs, hhmm: string): string {
   const [h, m] = hhmm.split(':').map((v) => parseInt(v, 10))
   return date.hour(h || 0).minute(m || 0).second(0).millisecond(0).toISOString()
+}
+
+/** 根据版本 ID 反查所属点子 ID */
+function findIdeaIdByVersion(versionId: string | null | undefined): string {
+  if (!versionId) return ''
+  for (const idea of ideas.value) {
+    if (idea.versions?.some((v) => v.id === versionId)) return idea.id
+  }
+  return ''
 }
 
 function openCreateLesson(): void {
@@ -559,6 +623,8 @@ function openCreateLesson(): void {
   lessonForm.startTime = '09:00'
   lessonForm.endTime = '10:30'
   lessonForm.subject = ''
+  lessonForm.ideaId = ''
+  lessonForm.ideaVersionId = ''
   lessonModalVisible.value = true
 }
 
@@ -571,7 +637,14 @@ function openEditLesson(l: Lesson): void {
   lessonForm.startTime = start.format('HH:mm')
   lessonForm.endTime = end.format('HH:mm')
   lessonForm.subject = l.subject ?? ''
+  lessonForm.ideaVersionId = l.ideaVersionId ?? ''
+  lessonForm.ideaId = findIdeaIdByVersion(l.ideaVersionId)
   lessonModalVisible.value = true
+}
+
+/** 切换点子时清空已选版本，避免版本不属于该点子 */
+function onIdeaChange(): void {
+  lessonForm.ideaVersionId = ''
 }
 
 async function submitLesson(): Promise<void> {
@@ -589,7 +662,8 @@ async function submitLesson(): Promise<void> {
       classId: lessonForm.classId,
       startTime: combineDateTime(lessonForm.date, lessonForm.startTime),
       endTime: combineDateTime(lessonForm.date, lessonForm.endTime),
-      subject: lessonForm.subject.trim() || undefined
+      subject: lessonForm.subject.trim() || undefined,
+      ideaVersionId: lessonForm.ideaVersionId || undefined
     }
     if (editingLessonId.value) {
       await call(window.api.lesson.update(editingLessonId.value, payload))
@@ -754,14 +828,17 @@ onMounted(async () => {
   } finally {
     classLoading.value = false
   }
+  // 加载备课点子，供课次关联备课版本
+  await loadIdeas()
 
-  // 订阅全局刷新事件：刷新时重新加载班级列表
+  // 订阅全局刷新事件：刷新时重新加载班级列表与备课点子
   offRefresh = subscribeRefresh(async () => {
     try {
       classes.value = await call(window.api.class.list())
     } catch (e) {
       message.error(String(e))
     }
+    await loadIdeas()
   })
 })
 

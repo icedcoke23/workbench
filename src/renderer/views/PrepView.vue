@@ -70,7 +70,11 @@
                     <a-list-item>
                       <a-list-item-meta>
                         <template #title>
-                          <span class="ver-name">{{ ver.versionName }}</span>
+                          <span class="ver-name">
+                            {{ ver.versionName }}
+                            <a-tag v-if="!ver.filePath" color="default" size="small">空版本</a-tag>
+                            <a-tag v-else color="green" size="small">有作品</a-tag>
+                          </span>
                         </template>
                         <template #description>
                           <div class="ver-notes">{{ ver.notes || '无备注' }}</div>
@@ -78,6 +82,9 @@
                         </template>
                       </a-list-item-meta>
                       <template #actions>
+                        <a-button size="small" :loading="previewingId === ver.id" @click="openVersionPreview(ver)">
+                          <EyeOutlined /> 预览
+                        </a-button>
                         <a-button type="primary" size="small" @click="launchVersion(ver.id)">
                           <PlayCircleOutlined /> 开始创作
                         </a-button>
@@ -162,6 +169,9 @@
             </template>
             <template v-else-if="column.key === 'action'">
               <a-space :size="6">
+                <a-button size="small" @click="openResourcePreview(record)">
+                  <EyeOutlined /> 预览
+                </a-button>
                 <a-button size="small" @click="openEditResourceModal(record)">
                   <EditOutlined /> 编辑
                 </a-button>
@@ -226,6 +236,42 @@
               </a-button>
             </a-space>
           </a-form>
+        </a-card>
+
+        <!-- 已关联文档列表 -->
+        <a-card title="已关联文档" class="docs-list-card" size="small" style="margin-top: 16px">
+          <template #extra>
+            <a-button size="small" @click="loadDocLinks"><ReloadOutlined /> 刷新</a-button>
+          </template>
+          <a-empty v-if="docLinks.length === 0" description="暂无关联文档" />
+          <a-list v-else :data-source="docLinks" size="small">
+            <template #renderItem="{ item }">
+              <a-list-item>
+                <a-list-item-meta>
+                  <template #title>
+                    <a class="doc-link-title" @click="openDocUrl(item.url)">
+                      {{ item.title || item.url }}
+                    </a>
+                  </template>
+                  <template #description>
+                    <span class="doc-link-meta">
+                      <a-tag v-if="item.class_name" color="blue">{{ item.class_name }}</a-tag>
+                      <span v-if="item.lesson_start_time">{{ formatDate(item.lesson_start_time) }}</span>
+                      <span class="doc-link-url">{{ item.url }}</span>
+                    </span>
+                  </template>
+                </a-list-item-meta>
+                <template #actions>
+                  <a-button size="small" @click="openDocUrl(item.url)">
+                    <GlobalOutlined /> 打开
+                  </a-button>
+                  <a-popconfirm title="确认取消该文档关联？" @confirm="removeDocLink(item.id)">
+                    <a-button size="small" danger><DeleteOutlined /></a-button>
+                  </a-popconfirm>
+                </template>
+              </a-list-item>
+            </template>
+          </a-list>
         </a-card>
       </a-tab-pane>
     </a-tabs>
@@ -307,12 +353,22 @@
           </a-form-item>
         </a-form>
       </div>
-      <div v-else class="save-resource-tip">
+      <div v-else class="save-resource-form">
         <a-alert
           type="info"
           show-icon
           message="将作为通用素材保存到资源库，可在「资源库」标签页中管理。"
+          style="margin-bottom: 12px"
         />
+        <a-form layout="vertical">
+          <a-form-item label="素材类型" required>
+            <a-radio-group v-model:value="saveForm.resourceType">
+              <a-radio-button value="sprite">角色</a-radio-button>
+              <a-radio-button value="backdrop">背景</a-radio-button>
+              <a-radio-button value="sound">音效</a-radio-button>
+            </a-radio-group>
+          </a-form-item>
+        </a-form>
       </div>
     </a-modal>
 
@@ -340,6 +396,71 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- ============ 版本预览 Modal ============ -->
+    <a-modal
+      v-model:open="versionPreviewVisible"
+      :title="`版本预览 - ${versionPreviewTitle}`"
+      :footer="null"
+      width="480px"
+    >
+      <a-spin :spinning="versionPreviewLoading">
+        <div v-if="versionPreviewMeta" class="version-preview">
+          <a-empty
+            v-if="!versionPreviewMeta.hasFile"
+            description="该版本暂无作品文件，点击「开始创作」可从空白开始创建"
+          />
+          <div v-else>
+            <a-descriptions :column="2" size="small" bordered>
+              <a-descriptions-item label="角色数">
+                {{ versionPreviewMeta.spriteCount }}
+              </a-descriptions-item>
+              <a-descriptions-item label="脚本数">
+                {{ versionPreviewMeta.scriptCount }}
+              </a-descriptions-item>
+              <a-descriptions-item label="造型数">
+                {{ versionPreviewMeta.costumeCount }}
+              </a-descriptions-item>
+              <a-descriptions-item label="音效数">
+                {{ versionPreviewMeta.soundCount }}
+              </a-descriptions-item>
+              <a-descriptions-item label="文件大小" :span="2">
+                {{ formatFileSize(versionPreviewMeta.fileSize) }}
+              </a-descriptions-item>
+            </a-descriptions>
+            <div v-if="versionPreviewMeta.spriteNames.length > 0" class="preview-sprites">
+              <span class="preview-sprites-label">包含角色：</span>
+              <a-tag v-for="name in versionPreviewMeta.spriteNames" :key="name" color="blue">
+                {{ name }}
+              </a-tag>
+            </div>
+          </div>
+        </div>
+      </a-spin>
+    </a-modal>
+
+    <!-- ============ 资源预览 Modal ============ -->
+    <a-modal
+      v-model:open="resourcePreviewVisible"
+      :title="`素材预览 - ${resourcePreviewTitle}`"
+      :footer="null"
+      width="520px"
+    >
+      <a-spin :spinning="resourcePreviewLoading">
+        <div class="resource-preview">
+          <a-empty
+            v-if="!resourcePreviewUrl"
+            description="无法预览该素材（文件可能已丢失或不支持预览）"
+          />
+          <div v-else-if="resourcePreviewType === 'sound'" class="preview-audio">
+            <audio :src="resourcePreviewUrl" controls style="width: 100%"></audio>
+          </div>
+          <div v-else class="preview-image">
+            <a-image :src="resourcePreviewUrl" :width="460" />
+          </div>
+        </div>
+      </a-spin>
+    </a-modal>
   </div>
 </template>
 
@@ -357,7 +478,8 @@ import {
   PlayCircleOutlined,
   LinkOutlined,
   GlobalOutlined,
-  EditOutlined
+  EditOutlined,
+  EyeOutlined
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
@@ -366,10 +488,13 @@ import { subscribeRefresh, subscribeNewItem } from '@renderer/composables/useSho
 import type {
   Idea,
   IdeaStatus,
+  IdeaVersion,
   Resource,
   ResourceType,
   Lesson,
-  ScratchSavePayload
+  ScratchSavePayload,
+  VersionMeta,
+  DocLinkWithLesson
 } from '@shared/types'
 
 // ============ 公共 ============
@@ -446,6 +571,37 @@ async function removeVersion(versionId: string): Promise<void> {
     await loadIdeas()
   } catch (e) {
     message.error(`删除失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
+// 版本预览
+const versionPreviewVisible = ref(false)
+const versionPreviewLoading = ref(false)
+const versionPreviewTitle = ref('')
+const versionPreviewMeta = ref<VersionMeta | null>(null)
+const previewingId = ref<string | null>(null)
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+async function openVersionPreview(ver: IdeaVersion): Promise<void> {
+  versionPreviewTitle.value = ver.versionName
+  versionPreviewMeta.value = null
+  versionPreviewVisible.value = true
+  previewingId.value = ver.id
+  versionPreviewLoading.value = true
+  try {
+    const meta = await call(window.api.idea.getVersionMeta(ver.id))
+    versionPreviewMeta.value = meta
+  } catch (e) {
+    message.error(`预览失败：${String(e instanceof Error ? e.message : e)}`)
+    versionPreviewVisible.value = false
+  } finally {
+    versionPreviewLoading.value = false
+    previewingId.value = null
   }
 }
 
@@ -617,6 +773,29 @@ async function removeResource(id: string): Promise<void> {
   }
 }
 
+// 资源预览
+const resourcePreviewVisible = ref(false)
+const resourcePreviewLoading = ref(false)
+const resourcePreviewTitle = ref('')
+const resourcePreviewUrl = ref('')
+const resourcePreviewType = ref<ResourceType | ''>('')
+
+async function openResourcePreview(record: Resource): Promise<void> {
+  resourcePreviewTitle.value = record.name
+  resourcePreviewUrl.value = ''
+  resourcePreviewType.value = record.type
+  resourcePreviewVisible.value = true
+  resourcePreviewLoading.value = true
+  try {
+    const dataUrl = await call(window.api.resource.readFile(record.filePath))
+    resourcePreviewUrl.value = dataUrl
+  } catch (e) {
+    message.error(`预览失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    resourcePreviewLoading.value = false
+  }
+}
+
 // 资源编辑（标签 + 名称）
 const editResourceModalVisible = ref(false)
 const editResourceSubmitting = ref(false)
@@ -700,6 +879,7 @@ async function linkDoc(): Promise<void> {
     docForm.url = ''
     docForm.title = ''
     docForm.lessonId = undefined
+    await loadDocLinks()
   } catch (e) {
     message.error(`关联失败：${String(e instanceof Error ? e.message : e)}`)
   }
@@ -718,15 +898,50 @@ async function openDocInBrowser(): Promise<void> {
   }
 }
 
+// 已关联文档列表
+const docLinks = ref<DocLinkWithLesson[]>([])
+
+async function loadDocLinks(): Promise<void> {
+  try {
+    docLinks.value = await call(window.api.doc.listAll())
+  } catch (e) {
+    message.error(`加载文档列表失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
+async function removeDocLink(id: string): Promise<void> {
+  try {
+    await call(window.api.doc.removeLink(id))
+    message.success('已取消关联')
+    await loadDocLinks()
+  } catch (e) {
+    message.error(`取消关联失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
+async function openDocUrl(url: string): Promise<void> {
+  try {
+    await call(window.api.doc.openUrl(url))
+  } catch (e) {
+    message.error(`打开失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
 // ============ Scratch 保存归档 ============
 const saveModalVisible = ref(false)
 const saveSubmitting = ref(false)
 const saveTarget = ref<'idea' | 'resource'>('idea')
 const saveIdeasLoading = ref(false)
-const saveForm = reactive<{ ideaId: string | undefined; versionName: string; notes: string }>({
+const saveForm = reactive<{
+  ideaId: string | undefined
+  versionName: string
+  notes: string
+  resourceType: ResourceType
+}>({
   ideaId: undefined,
   versionName: '',
-  notes: ''
+  notes: '',
+  resourceType: 'sprite'
 })
 let pendingSavePayload: ScratchSavePayload | null = null
 
@@ -740,6 +955,7 @@ async function handleScratchSave(payload: ScratchSavePayload): Promise<void> {
   saveForm.ideaId = undefined
   saveForm.versionName = ''
   saveForm.notes = ''
+  saveForm.resourceType = 'sprite'
   // 刷新点子列表，确保下拉框可选到最新点子
   saveIdeasLoading.value = true
   try {
@@ -787,7 +1003,7 @@ async function submitSave(): Promise<void> {
   } else {
     saveSubmitting.value = true
     try {
-      await call(window.api.scratch.saveToResource(pendingSavePayload))
+      await call(window.api.scratch.saveToResource(pendingSavePayload, saveForm.resourceType))
       message.success('已保存到资源库')
       saveModalVisible.value = false
       pendingSavePayload = null
@@ -813,18 +1029,20 @@ onMounted(() => {
   loadResources()
   loadAllTags()
   loadLessons()
+  loadDocLinks()
 
   const subscribe = window.events['scratch:save-request'] as unknown as SubscribeSave
   offScratchSave = subscribe((payload) => {
     handleScratchSave(payload)
   })
 
-  // 订阅全局刷新事件：刷新时重新加载点子库、资源库、标签、课次
+  // 订阅全局刷新事件：刷新时重新加载点子库、资源库、标签、课次、文档
   offRefresh = subscribeRefresh(() => {
     loadIdeas()
     loadResources()
     loadAllTags()
     loadLessons()
+    loadDocLinks()
   })
   // 订阅全局新增事件：触发新建点子弹窗
   offNewItem = subscribeNewItem(openNewIdeaModal, 'prep')
@@ -900,6 +1118,29 @@ onUnmounted(() => {
   color: #9ca3af;
   margin-top: 2px;
 }
+.version-preview {
+  min-height: 120px;
+}
+.preview-sprites {
+  margin-top: 12px;
+}
+.preview-sprites-label {
+  color: #6b7280;
+  margin-right: 8px;
+}
+.resource-preview {
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.preview-image {
+  text-align: center;
+}
+.preview-audio {
+  width: 100%;
+  padding: 24px 0;
+}
 .filter-row {
   display: flex;
   gap: 12px;
@@ -907,6 +1148,27 @@ onUnmounted(() => {
 }
 .docs-card {
   max-width: 640px;
+}
+.docs-list-card {
+  max-width: 640px;
+}
+.doc-link-title {
+  color: #1677ff;
+  cursor: pointer;
+}
+.doc-link-title:hover {
+  text-decoration: underline;
+}
+.doc-link-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.doc-link-url {
+  color: #9ca3af;
+  font-size: 12px;
+  word-break: break-all;
 }
 .docs-alert {
   margin-bottom: 16px;
@@ -927,7 +1189,7 @@ onUnmounted(() => {
   border-top: 1px solid #eef0f4;
   padding-top: 12px;
 }
-.save-resource-tip {
+.save-resource-form {
   border-top: 1px solid #eef0f4;
   padding-top: 12px;
 }

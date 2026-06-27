@@ -28,6 +28,8 @@ import type {
   StudentInput,
   SyncSettings,
   Todo,
+  VersionMeta,
+  DocLinkWithLesson,
   WeChatSettings,
   ScheduleParseResult,
   ScratchSettings
@@ -39,9 +41,9 @@ export const API_METHODS: Record<string, string[]> = {
   student: ['list', 'get', 'create', 'update', 'remove', 'allTags'],
   class: ['list', 'get', 'create', 'update', 'remove', 'members', 'addMembers', 'removeMember'],
   lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'records', 'score', 'pick'],
-  idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'removeVersion'],
+  idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'updateVersion', 'removeVersion', 'getVersionMeta'],
   todo: ['list', 'create', 'update', 'remove', 'regenerate'],
-  resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags'],
+  resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags', 'readFile'],
   feedback: ['list', 'get', 'save', 'remove', 'generate', 'generateReport', 'exportPdf', 'sendWeChat'],
   feedbackTemplate: ['list', 'create', 'update', 'remove'],
   schedule: ['parseText', 'parseImage', 'import'],
@@ -50,7 +52,7 @@ export const API_METHODS: Record<string, string[]> = {
   dashboard: ['get'],
   data: ['export', 'importFromFile', 'pickImportFile', 'saveExportToFile'],
   studentHistory: ['get'],
-  doc: ['openUrl', 'linkToLesson', 'listLinks'],
+  doc: ['openUrl', 'linkToLesson', 'listLinks', 'listAll', 'removeLink'],
   file: ['pickImage', 'saveAvatar', 'readImageBase64']
 }
 
@@ -96,7 +98,9 @@ export interface WorkbenchAPI {
     update: (id: ID, input: Partial<IdeaInput>) => Promise<Result<Idea>>
     remove: (id: ID) => Promise<Result<void>>
     createVersion: (input: IdeaVersionInput) => Promise<Result<IdeaVersion>>
+    updateVersion: (versionId: ID, input: Partial<Pick<IdeaVersionInput, 'versionName' | 'notes'>>) => Promise<Result<IdeaVersion>>
     removeVersion: (versionId: ID) => Promise<Result<void>>
+    getVersionMeta: (versionId: ID) => Promise<Result<VersionMeta>>
   }
   // 待办
   todo: {
@@ -114,6 +118,7 @@ export interface WorkbenchAPI {
     remove: (id: ID) => Promise<Result<void>>
     importFile: (filePath: string, type: Resource['type']) => Promise<Result<Resource>>
     allTags: () => Promise<Result<string[]>>
+    readFile: (filePath: string) => Promise<Result<string>>
   }
   // 反馈/报告
   feedback: {
@@ -144,7 +149,7 @@ export interface WorkbenchAPI {
     launch: (versionId?: ID) => Promise<Result<void>>
     close: () => Promise<Result<void>>
     saveToIdea: (payload: ScratchSavePayload, target: ArchiveTarget) => Promise<Result<IdeaVersion>>
-    saveToResource: (payload: ScratchSavePayload) => Promise<Result<Resource>>
+    saveToResource: (payload: ScratchSavePayload, type?: Resource['type']) => Promise<Result<Resource>>
     pickResourceFile: () => Promise<Result<Resource>>
   }
   // 设置
@@ -178,6 +183,8 @@ export interface WorkbenchAPI {
     openUrl: (url: string) => Promise<Result<void>>
     linkToLesson: (lessonId: ID, url: string, title: string) => Promise<Result<void>>
     listLinks: (lessonId: ID) => Promise<Result<Array<{ id: ID; url: string; title: string }>>>
+    listAll: () => Promise<Result<DocLinkWithLesson[]>>
+    removeLink: (id: ID) => Promise<Result<void>>
   }
   // 文件
   file: {

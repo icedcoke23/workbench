@@ -315,6 +315,28 @@ export interface ArchiveTarget {
   notes?: string
 }
 
+/** 版本作品元信息，用于在不打开编辑器的情况下快速预览 */
+export interface VersionMeta {
+  hasFile: boolean
+  spriteCount: number
+  scriptCount: number
+  costumeCount: number
+  soundCount: number
+  spriteNames: string[]
+  fileSize: number
+}
+
+/** 文档关联记录（含班级名，用于管理列表展示） */
+export interface DocLinkWithLesson {
+  id: string
+  lesson_id: string
+  url: string
+  title: string | null
+  created_at: string
+  class_name: string | null
+  lesson_start_time: string | null
+}
+
 // ============ 菜单 / 快捷键 ============
 export type ViewName =
   | 'dashboard'

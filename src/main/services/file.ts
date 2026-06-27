@@ -34,6 +34,30 @@ export function readImageBase64(path: string): string {
   return `data:image/${mime};base64,${buf.toString('base64')}`
 }
 
+/** 根据扩展名推断 MIME 类型 */
+function mimeFromExt(ext: string): string {
+  const map: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    wav: 'audio/wav',
+    mp3: 'audio/mpeg',
+    ogg: 'audio/ogg'
+  }
+  return map[ext] ?? 'application/octet-stream'
+}
+
+/** 读取任意资源文件为 data URL（图片/音频可直接用于预览） */
+export function readFileAsDataUrl(path: string): string {
+  const buf = readFileSync(path)
+  const ext = extname(path).slice(1).toLowerCase()
+  const mime = mimeFromExt(ext)
+  return `data:${mime};base64,${buf.toString('base64')}`
+}
+
 /** 资源库文件导入：拷贝到 userData/resources 并返回新路径 */
 export async function importResourceFile(
   filePath: string,

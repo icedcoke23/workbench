@@ -71,7 +71,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('idea:update', (_e, id, input) => tryRun(() => ideaRepo.update(id, input)))
   ipcMain.handle('idea:remove', (_e, id) => tryRun(() => ideaRepo.remove(id)))
   ipcMain.handle('idea:createVersion', (_e, input) => tryRun(() => ideaRepo.createVersion(input)))
+  ipcMain.handle('idea:updateVersion', (_e, id, input) => tryRun(() => ideaRepo.updateVersion(id, input)))
   ipcMain.handle('idea:removeVersion', (_e, id) => tryRun(() => ideaRepo.removeVersion(id)))
+  ipcMain.handle('idea:getVersionMeta', (_e, id) => tryRunAsync(() => scratchService.getVersionMeta(id)))
 
   // ============ 待办 ============
   ipcMain.handle('todo:list', () => tryRun(() => todoRepo.list()))
@@ -92,6 +94,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       return resourceRepo.create({ name, type, filePath: dest })
     })
   )
+  ipcMain.handle('resource:readFile', (_e, filePath) => tryRun(() => fileService.readFileAsDataUrl(filePath)))
 
   // ============ 反馈/报告 ============
   ipcMain.handle('feedback:list', (_e, q) => tryRun(() => feedbackRepo.list(q)))
@@ -241,8 +244,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('scratch:saveToIdea', async (_e, payload, target) =>
     tryRunAsync(() => scratchService.saveToIdea(payload, target))
   )
-  ipcMain.handle('scratch:saveToResource', async (_e, payload) =>
-    tryRunAsync(() => scratchService.saveToResource(payload))
+  ipcMain.handle('scratch:saveToResource', async (_e, payload, type) =>
+    tryRunAsync(() => scratchService.saveToResource(payload, type))
   )
   ipcMain.handle('scratch:pickResourceFile', async () =>
     tryRunAsync(async () => {
@@ -267,6 +270,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     tryRun(() => docRepo.link(lessonId, url, title))
   )
   ipcMain.handle('doc:listLinks', (_e, lessonId) => tryRun(() => docRepo.listByLesson(lessonId)))
+  ipcMain.handle('doc:listAll', () => tryRun(() => docRepo.listAll()))
+  ipcMain.handle('doc:removeLink', (_e, id) => tryRun(() => docRepo.remove(id)))
 
   // ============ 文件 ============
   ipcMain.handle('file:pickImage', async () =>

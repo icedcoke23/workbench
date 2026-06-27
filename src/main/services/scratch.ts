@@ -6,7 +6,7 @@ import JSZip from 'jszip'
 import { getScratch } from '../database/repositories/settings'
 import * as ideaRepo from '../database/repositories/ideas'
 import * as resourceRepo from '../database/repositories/resources'
-import type { ArchiveTarget, IdeaVersion, Resource, ScratchSavePayload } from '@shared/types'
+import type { ArchiveTarget, IdeaVersion, Resource, ScratchSavePayload, VersionMeta } from '@shared/types'
 
 let scratchWin: BrowserWindow | null = null
 let mainWindowRef: BrowserWindow | null = null
@@ -206,14 +206,17 @@ export async function saveToIdea(
 }
 
 /** 保存到资源库（作为示例作品素材） */
-export async function saveToResource(payload: ScratchSavePayload): Promise<Resource> {
+export async function saveToResource(
+  payload: ScratchSavePayload,
+  type: Resource['type'] = 'sprite'
+): Promise<Resource> {
   const dir = join(workspaceDir(), '_resources')
   await mkdir(dir, { recursive: true })
   const name = safeFileName(payload.fileName || `scratch-${Date.now()}`)
   const filePath = join(dir, `${name}.sb3`)
   const sb3 = await packSb3(payload.projectJson)
   await writeFile(filePath, sb3)
-  return resourceRepo.create({ name, type: 'sprite', filePath })
+  return resourceRepo.create({ name, type, filePath })
 }
 
 /** 将项目 JSON 打包为 .sb3（zip，含 project.json） */
@@ -236,4 +239,60 @@ async function readSb3ProjectJson(sb3Path: string): Promise<unknown> {
   if (!file) throw new Error('sb3 中未找到 project.json')
   const text = await file.async('string')
   return JSON.parse(text)
+}
+
+/** 读取版本 .sb3 的元信息（角色数、积木数等），无需打开编辑器 */
+export async function getVersionMeta(versionId: string): Promise<VersionMeta> {
+  const version = ideaRepo.getVersion(versionId)
+  if (!version?.filePath || !existsSync(version.filePath)) {
+    return {
+      hasFile: false,
+      spriteCount: 0,
+      scriptCount: 0,
+      costumeCount: 0,
+      soundCount: 0,
+      spriteNames: [],
+      fileSize: 0
+    }
+  }
+  const stat = await import('fs/promises').then((m) => m.stat(version.filePath!))
+  let spriteCount = 0
+  let scriptCount = 0
+  let costumeCount = 0
+  let soundCount = 0
+  let spriteNames: string[] = []
+  try {
+    const projectJson = (await readSb3ProjectJson(version.filePath)) as {
+      targets?: Array<{
+        name?: string
+        isStage?: boolean
+        blocks?: Record<string, unknown>
+        costumes?: unknown[]
+        sounds?: unknown[]
+      }>
+    }
+    const targets = projectJson.targets ?? []
+    spriteNames = targets.filter((t) => !t.isStage).map((t) => t.name ?? '未命名')
+    spriteCount = spriteNames.length
+    for (const t of targets) {
+      // blocks 中顶层块（含 topLevel=true）即为脚本入口
+      const blocks = t.blocks ?? {}
+      scriptCount += Object.values(blocks).filter(
+        (b) => (b as { topLevel?: boolean })?.topLevel === true
+      ).length
+      costumeCount += t.costumes?.length ?? 0
+      soundCount += t.sounds?.length ?? 0
+    }
+  } catch (e) {
+    console.error('[scratch] 读取版本元信息失败', e)
+  }
+  return {
+    hasFile: true,
+    spriteCount,
+    scriptCount,
+    costumeCount,
+    soundCount,
+    spriteNames,
+    fileSize: stat.size
+  }
 }
