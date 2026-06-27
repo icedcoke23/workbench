@@ -34,7 +34,15 @@ export async function sendToWeChat(params: {
 
   // 设置剪贴板内容
   if (params.pdfPath && existsSync(params.pdfPath)) {
-    await setClipboardFile(params.pdfPath)
+    try {
+      await setClipboardFile(params.pdfPath)
+    } catch (e) {
+      // 剪贴板设置失败时不能继续发送，否则会粘贴旧内容造成误发
+      return {
+        ok: false,
+        message: `设置剪贴板文件失败：${e instanceof Error ? e.message : String(e)}`
+      }
+    }
   } else if (params.text) {
     clipboard.writeText(params.text)
   } else {
@@ -56,19 +64,17 @@ export async function sendToWeChat(params: {
 
 /** 通过 PowerShell Set-Clipboard 设置文件（用于发送附件） */
 async function setClipboardFile(filePath: string): Promise<void> {
-  const ps = `Set-Clipboard -LiteralPath "${filePath.replace(/"/g, '""')}"`
-  try {
-    await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
-      timeout: 10_000,
-      windowsHide: true
-    })
-  } catch {
-    // 忽略：回退到文本
-  }
+  // 使用单引号字符串并转义单引号，避免 $ 变量展开与注入
+  const psLiteral = filePath.replace(/'/g, "''")
+  const ps = `Set-Clipboard -LiteralPath '${psLiteral}'`
+  await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+    timeout: 10_000,
+    windowsHide: true
+  })
 }
 
 function buildPsScript(groupName: string, delay: number): string {
-  const titles = WECOM_TITLES.map((t) => `'${t}'`).join(',')
+  const titles = WECOM_TITLES.map((t) => `'${t.replace(/'/g, "''")}'`).join(',')
   const wait = (ms: number) => `Start-Sleep -Milliseconds ${ms}`
   return `
 $ErrorActionPreference = 'Stop'

@@ -94,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   PlusOutlined,
@@ -215,11 +215,19 @@ function openHistory(s: Student): void {
   historyOpen.value = true
 }
 
+let offRefresh: (() => void) | null = null
+let offNewItem: (() => void) | null = null
 onMounted(() => {
   loadStudents()
   // 订阅全局刷新与新增事件
-  subscribeRefresh(loadStudents)
-  subscribeNewItem(openCreate)
+  offRefresh = subscribeRefresh(loadStudents)
+  offNewItem = subscribeNewItem(openCreate, 'students')
+})
+onUnmounted(() => {
+  offRefresh?.()
+  offRefresh = null
+  offNewItem?.()
+  offNewItem = null
 })
 </script>
 

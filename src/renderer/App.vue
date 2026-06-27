@@ -161,7 +161,10 @@ function onImportData(): void {
 useShortcuts({
   onNavigate,
   onToggleSidebar,
-  onNewItem: triggerNewItem,
+  onNewItem: () => {
+    // 仅触发当前激活视图对应的新增监听器，避免在所有缓存视图同时打开弹窗
+    triggerNewItem(route.name as ViewName)
+  },
   onRefresh: triggerRefresh,
   onExportData,
   onImportData,

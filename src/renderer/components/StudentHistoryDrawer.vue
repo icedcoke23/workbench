@@ -154,18 +154,23 @@ function formatDate(iso: string): string {
 }
 
 // 监听抽屉打开与学生 ID，打开且有 ID 时加载历史
+// 使用请求 token 避免竞态：快速切换学生时丢弃过期的请求结果
+let reqId = 0
 watch(
   [() => props.open, () => props.studentId],
   async ([open, id]) => {
     if (open && id) {
+      const myId = ++reqId
       loading.value = true
       history.value = null
       try {
-        history.value = await call(window.api.studentHistory.get(id))
+        const data = await call(window.api.studentHistory.get(id))
+        if (myId !== reqId) return // 已被更新的请求取代，丢弃
+        history.value = data
       } catch (e) {
-        message.error(String(e))
+        if (myId === reqId) message.error(String(e))
       } finally {
-        loading.value = false
+        if (myId === reqId) loading.value = false
       }
     } else if (!open) {
       // 关闭时清空数据

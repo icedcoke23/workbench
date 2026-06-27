@@ -809,7 +809,7 @@ onMounted(() => {
     loadLessons()
   })
   // 订阅全局新增事件：触发新建点子弹窗
-  offNewItem = subscribeNewItem(openNewIdeaModal)
+  offNewItem = subscribeNewItem(openNewIdeaModal, 'prep')
 })
 
 onUnmounted(() => {

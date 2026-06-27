@@ -149,14 +149,17 @@ export function score(action: ScoreAction): LessonRecord {
   const lesson = get(action.lessonId)
   if (!lesson) throw new Error('课次不存在')
   const id = uuid()
-  db()
-    .prepare(
-      `INSERT INTO lesson_records (id, lesson_id, student_id, score_change, participation_note)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(id, action.lessonId, action.studentId, action.scoreChange, action.note ?? null)
-  // 同步更新班级累计积分
-  classRepo.addScore(lesson.classId, action.studentId, action.scoreChange)
+  // 用事务包裹两条写入，保证课堂记录与累计积分一致
+  db().transaction(() => {
+    db()
+      .prepare(
+        `INSERT INTO lesson_records (id, lesson_id, student_id, score_change, participation_note)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(id, action.lessonId, action.studentId, action.scoreChange, action.note ?? null)
+    // 同步更新班级累计积分
+    classRepo.addScore(lesson.classId, action.studentId, action.scoreChange)
+  })()
   return records(action.lessonId).find((r) => r.id === id)!
 }
 

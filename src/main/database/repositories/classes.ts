@@ -21,10 +21,15 @@ function mapRow(r: ClassRow, studentCount = 0): ClassInfo {
   }
 }
 
-export function list(_q?: PageQuery): ClassInfo[] {
-  const rows = db()
-    .prepare(`SELECT * FROM classes ORDER BY created_at DESC`)
-    .all() as ClassRow[]
+export function list(q?: PageQuery): ClassInfo[] {
+  const keyword = q?.keyword?.trim()
+  const rows = keyword
+    ? (db()
+        .prepare(`SELECT * FROM classes WHERE name LIKE ? ORDER BY created_at DESC`)
+        .all(`%${keyword}%`) as ClassRow[])
+    : (db()
+        .prepare(`SELECT * FROM classes ORDER BY created_at DESC`)
+        .all() as ClassRow[])
   const countStmt = db().prepare(
     `SELECT COUNT(*) as c FROM enrollments WHERE class_id = ?`
   )

@@ -82,11 +82,16 @@ export function subscribeRefresh(fn: () => void): () => void {
   return () => refreshListeners.delete(fn)
 }
 
-/** 触发刷新：遍历所有监听器，逐个 try/catch 避免相互影响 */
+/** 触发刷新：遍历所有监听器，逐个 try/catch 避免相互影响；兼容 async 监听器 */
 export function triggerRefresh(): void {
   for (const fn of refreshListeners) {
     try {
-      fn()
+      const r = fn() as unknown
+      if (r && typeof (r as Promise<void>).then === 'function') {
+        ;(r as Promise<void>).catch((e) =>
+          console.error('[useShortcuts] refresh listener async error:', e)
+        )
+      }
     } catch (e) {
       // 忽略单个监听器的异常，继续通知其他监听器
       console.error('[useShortcuts] refresh listener error:', e)
@@ -94,20 +99,31 @@ export function triggerRefresh(): void {
   }
 }
 
-// 新增项监听集合：供各视图订阅「新增」动作
-const newItemListeners = new Set<() => void>()
+// 新增项监听集合：每项绑定所属视图名，仅当前激活视图的监听器会被触发
+const newItemListeners = new Set<{ fn: () => void; view: ViewName }>()
 
-/** 订阅新增项事件，返回取消订阅函数 */
-export function subscribeNewItem(fn: () => void): () => void {
-  newItemListeners.add(fn)
-  return () => newItemListeners.delete(fn)
+/**
+ * 订阅新增项事件，返回取消订阅函数。
+ * @param fn 回调
+ * @param view 所属视图名，仅当用户当前处于该视图时才会触发
+ */
+export function subscribeNewItem(fn: () => void, view: ViewName): () => void {
+  const entry = { fn, view }
+  newItemListeners.add(entry)
+  return () => newItemListeners.delete(entry)
 }
 
-/** 触发新增项：遍历所有监听器，逐个 try/catch */
-export function triggerNewItem(): void {
-  for (const fn of newItemListeners) {
+/** 触发新增项：仅触发与当前激活视图匹配的监听器，逐个 try/catch */
+export function triggerNewItem(currentView: ViewName): void {
+  for (const entry of newItemListeners) {
+    if (entry.view !== currentView) continue
     try {
-      fn()
+      const r = entry.fn() as unknown
+      if (r && typeof (r as Promise<void>).then === 'function') {
+        ;(r as Promise<void>).catch((e) =>
+          console.error('[useShortcuts] new-item listener async error:', e)
+        )
+      }
     } catch (e) {
       console.error('[useShortcuts] new-item listener error:', e)
     }

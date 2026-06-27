@@ -39,12 +39,15 @@ export async function importResourceFile(
   filePath: string,
   type: 'backdrop' | 'sprite' | 'sound'
 ): Promise<{ name: string; filePath: string }> {
+  if (!existsSync(filePath)) {
+    throw new Error(`源文件不存在：${filePath}`)
+  }
   const dir = join(app.getPath('userData'), 'resources', type)
   await mkdir(dir, { recursive: true })
   const name = basename(filePath, extname(filePath))
   const ext = extname(filePath)
   const dest = join(dir, `${name}-${uuid().slice(0, 8)}${ext}`)
-  if (existsSync(filePath)) await copyFile(filePath, dest)
+  await copyFile(filePath, dest)
   return { name, filePath: dest }
 }
 

@@ -3,7 +3,7 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { join } from 'path'
 import { initDatabase, closeDatabase } from './database/db'
 import { registerIpc } from './ipc'
-import { registerScratchIpc, setMainWindow } from './services/scratch'
+import { registerScratchIpc, setMainWindow, close as closeScratch } from './services/scratch'
 import { regenerateAutoTodos } from './services/todos'
 import { getSync } from './database/repositories/settings'
 import { syncNow } from './services/sync'
@@ -121,5 +121,11 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  // 关闭 Scratch 编辑器子窗口，避免残留进程
+  try {
+    closeScratch()
+  } catch {
+    // 忽略关闭错误
+  }
   closeDatabase()
 })

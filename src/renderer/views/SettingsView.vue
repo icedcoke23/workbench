@@ -222,7 +222,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, h } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, h } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import {
   SaveOutlined,
@@ -463,12 +463,18 @@ function handleBackupAction(e: Event): void {
   }
 }
 
+let offRefresh: (() => void) | null = null
 onMounted(() => {
   load()
   // 订阅全局刷新事件
-  subscribeRefresh(load)
+  offRefresh = subscribeRefresh(load)
   // 监听快捷键触发的备份动作
   window.addEventListener('workbench:goto-backup', handleBackupAction)
+})
+onUnmounted(() => {
+  offRefresh?.()
+  offRefresh = null
+  window.removeEventListener('workbench:goto-backup', handleBackupAction)
 })
 </script>
 

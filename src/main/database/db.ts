@@ -22,6 +22,9 @@ export function initDatabase(dbPath: string): DB {
   // 执行建表脚本
   db.exec(schemaSql)
 
+  // 先暴露实例，种子数据初始化内部需要通过 db() 取实例
+  dbInstance = db
+
   // 初始化种子数据（内置模板 + 示例数据）
   try {
     seedIfEmpty()
@@ -34,7 +37,6 @@ export function initDatabase(dbPath: string): DB {
     `INSERT OR IGNORE INTO sync_state (id, device_id) VALUES (1, ?)`
   ).run(randomUUID())
 
-  dbInstance = db
   return db
 }
 

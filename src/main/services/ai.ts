@@ -7,12 +7,12 @@ export interface ChatMessage {
   content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>
 }
 
-/** 获取已配置的 AI 设置，并补全默认 systemPrompt */
+/** 获取已配置的 AI 设置，并补全默认 systemPrompt（不修改源对象） */
 export function resolveAISettings(): AISettings | null {
   const s = getAI()
   if (!s.useCustomAI || !s.apiKey || !s.baseUrl) return null
-  if (!s.systemPrompt) s.systemPrompt = getDefaultSystemPrompt()
-  return s
+  // 返回副本，避免污染持久化设置缓存
+  return { ...s, systemPrompt: s.systemPrompt || getDefaultSystemPrompt() }
 }
 
 /** 非流式调用（兼容 OpenAI 协议） */
@@ -172,7 +172,14 @@ export function extractJSON(text: string): unknown {
     return JSON.parse(text)
   } catch {
     const m = text.match(/\{[\s\S]*\}/)
-    if (m) return JSON.parse(m[0])
+    if (m) {
+      // 第二次解析也需保护，AI 输出可能仍非法
+      try {
+        return JSON.parse(m[0])
+      } catch {
+        throw new Error('无法解析 AI 返回的 JSON（提取片段仍非法）')
+      }
+    }
     throw new Error('无法解析 AI 返回的 JSON')
   }
 }

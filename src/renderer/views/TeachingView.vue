@@ -176,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, defineComponent, h, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, onDeactivated, onActivated, defineComponent, h, watch } from 'vue'
 import { message, Modal, Button as AButton, InputNumber as AInputNumber } from 'ant-design-vue'
 import {
   PlayCircleOutlined,
@@ -296,6 +296,33 @@ const CountDownTimer = defineComponent({
       isFullscreen.value = !!document.fullscreenElement
     }
     document.addEventListener('fullscreenchange', onFsChange)
+
+    // keep-alive 停用时暂停计时器，避免后台响铃；重新激活时若仍在运行则恢复
+    let wasRunning = false
+    onDeactivated(() => {
+      wasRunning = running.value
+      if (running.value) {
+        running.value = false
+        clearTimer()
+      }
+    })
+    onActivated(() => {
+      if (wasRunning && !running.value && remaining.value > 0) {
+        running.value = true
+        intervalId = window.setInterval(() => {
+          if (remaining.value > 0) {
+            remaining.value -= 1
+            if (remaining.value === 0) {
+              running.value = false
+              clearTimer()
+              beep()
+              message.warning('时间到！')
+            }
+          }
+        }, 1000)
+      }
+      wasRunning = false
+    })
 
     onBeforeUnmount(() => {
       clearTimer()
@@ -484,6 +511,10 @@ async function randomPick(): Promise<void> {
   picking.value = true
   try {
     const student = await call(window.api.lesson.pick(teachingLesson.value.id))
+    if (!student) {
+      message.warning('班级暂无学生')
+      return
+    }
     pickResult.value = student
     pickedId.value = student.id
     window.setTimeout(() => {
@@ -532,9 +563,19 @@ onMounted(async () => {
   }
 
   // 订阅全局刷新事件：刷新时重新加载班级列表
-  subscribeRefresh(async () => {
-    classes.value = await call(window.api.class.list())
+  offRefresh = subscribeRefresh(async () => {
+    try {
+      classes.value = await call(window.api.class.list())
+    } catch (e) {
+      message.error(String(e))
+    }
   })
+})
+
+let offRefresh: (() => void) | null = null
+onUnmounted(() => {
+  offRefresh?.()
+  offRefresh = null
 })
 </script>
 

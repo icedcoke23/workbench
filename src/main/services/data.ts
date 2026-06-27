@@ -73,6 +73,10 @@ export async function pickImportFile(): Promise<string | null> {
 /**
  * 从文件导入数据：在一个事务中按反向顺序清空表，再按正向顺序 INSERT OR REPLACE。
  * 事务失败自动回滚。返回 { tables: 涉及表数, rows: 总行数 }
+ *
+ * 健壮性：
+ * - 仅清空/导入备份中实际包含的表（缺表的备份不会清空对应表）
+ * - 列名与目标表实际列取交集，防止备份文件含非法列名导致 SQL 解析失败
  */
 export function importFromFile(filePath: string): { tables: number; rows: number } {
   if (!existsSync(filePath)) {
@@ -82,21 +86,31 @@ export function importFromFile(filePath: string): { tables: number; rows: number
   const payload = JSON.parse(raw) as ExportPayload
   const tables = payload.tables ?? {}
 
+  // 仅处理 EXPORT_TABLES 中存在且备份文件中也存在的表
+  const presentTables = EXPORT_TABLES.filter((t) => Array.isArray(tables[t]))
+
   let tableCount = 0
   let rowCount = 0
   const conn = db()
   const importTx = conn.transaction(() => {
-    // 反向顺序清空（先清依赖方，再清被依赖方）
+    // 反向顺序清空（仅清空备份中包含的表，避免缺表备份导致数据丢失）
     for (let i = EXPORT_TABLES.length - 1; i >= 0; i--) {
-      conn.prepare(`DELETE FROM ${EXPORT_TABLES[i]}`).run()
+      const t = EXPORT_TABLES[i]
+      if (presentTables.includes(t)) {
+        conn.prepare(`DELETE FROM ${t}`).run()
+      }
     }
     // 正向顺序插入（先插被依赖方，再插依赖方）
-    for (const table of EXPORT_TABLES) {
+    for (const table of presentTables) {
       const rows = tables[table]
       if (!rows || rows.length === 0) continue
-      // 从首行取列名，构造动态 INSERT OR REPLACE
+      // 取目标表实际列名，与备份首行列名取交集，防止非法列名
+      const tableCols = (
+        conn.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+      ).map((c) => c.name)
+      const tableColsSet = new Set(tableCols)
       const first = rows[0] as Record<string, unknown>
-      const cols = Object.keys(first)
+      const cols = Object.keys(first).filter((c) => tableColsSet.has(c))
       if (cols.length === 0) continue
       const placeholders = cols.map(() => '?').join(', ')
       const stmt = conn.prepare(

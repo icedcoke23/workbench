@@ -167,7 +167,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   PlusOutlined,
@@ -389,11 +389,19 @@ async function removeMember(studentId: string): Promise<void> {
   }
 }
 
+let offRefresh: (() => void) | null = null
+let offNewItem: (() => void) | null = null
 onMounted(() => {
   loadClasses()
   // 订阅全局刷新与新增事件
-  subscribeRefresh(loadClasses)
-  subscribeNewItem(openCreate)
+  offRefresh = subscribeRefresh(loadClasses)
+  offNewItem = subscribeNewItem(openCreate, 'classes')
+})
+onUnmounted(() => {
+  offRefresh?.()
+  offRefresh = null
+  offNewItem?.()
+  offNewItem = null
 })
 </script>
 

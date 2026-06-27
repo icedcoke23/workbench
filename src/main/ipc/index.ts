@@ -1,5 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { db, tryRun, tryRunAsync } from '../database/db'
+import type { Resource } from '@shared/types'
 import * as studentRepo from '../database/repositories/students'
 import * as classRepo from '../database/repositories/classes'
 import * as lessonRepo from '../database/repositories/lessons'
@@ -210,9 +211,13 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
   // ============ 数据备份 ============
   ipcMain.handle('data:export', () => tryRun(() => dataService.exportAll()))
-  ipcMain.handle('data:saveExportToFile', (_e, json) => tryRun(() => dataService.saveExportToFile(json)))
+  ipcMain.handle('data:saveExportToFile', (_e, json) =>
+    tryRunAsync(async () => dataService.saveExportToFile(json))
+  )
   ipcMain.handle('data:pickImportFile', async () => tryRunAsync(async () => dataService.pickImportFile()))
-  ipcMain.handle('data:importFromFile', (_e, filePath) => tryRun(() => dataService.importFromFile(filePath)))
+  ipcMain.handle('data:importFromFile', (_e, filePath) =>
+    tryRunAsync(async () => dataService.importFromFile(filePath))
+  )
 
   // ============ 学生学习历史 ============
   ipcMain.handle('studentHistory:get', (_e, studentId) => tryRun(() => historyService.getStudentHistory(studentId)))
@@ -230,9 +235,13 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   )
   ipcMain.handle('scratch:pickResourceFile', async () =>
     tryRunAsync(async () => {
-      const p = await fileService.pickResourceFile?.()
+      const p = await fileService.pickResourceFile()
       if (!p) throw new Error('取消选择')
-      return p
+      // 按扩展名推断类型，导入并创建资源记录
+      const ext = p.toLowerCase().split('.').pop() || ''
+      const type: Resource['type'] = ext === 'wav' || ext === 'mp3' ? 'sound' : 'sprite'
+      const { name, filePath } = await fileService.importResourceFile(p, type)
+      return resourceRepo.create({ name, type, filePath, tags: [] })
     })
   )
 

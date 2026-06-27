@@ -1,4 +1,5 @@
 import { app, Menu, type BrowserWindow, dialog, shell } from 'electron'
+import { join } from 'path'
 import type { MenuAction, ViewName } from '@shared/types'
 import { getLogger } from './services/logger'
 
@@ -9,15 +10,15 @@ function sendAction(win: BrowserWindow | null, action: MenuAction): void {
   }
 }
 
-/** 导航菜单项：7 个主视图，含快捷键 */
+/** 导航菜单项：7 个主视图，含快捷键（CmdOrCtrl 跨平台适配） */
 const NAV_ITEMS: Array<{ label: string; view: ViewName; accelerator: string }> = [
-  { label: '工作看板', view: 'dashboard', accelerator: 'Ctrl+1' },
-  { label: '学生管理', view: 'students', accelerator: 'Ctrl+2' },
-  { label: '班级管理', view: 'classes', accelerator: 'Ctrl+3' },
-  { label: '备课中心', view: 'prep', accelerator: 'Ctrl+4' },
-  { label: '授课中心', view: 'teaching', accelerator: 'Ctrl+5' },
-  { label: '课后中心', view: 'post', accelerator: 'Ctrl+6' },
-  { label: '设置', view: 'settings', accelerator: 'Ctrl+7' }
+  { label: '工作看板', view: 'dashboard', accelerator: 'CmdOrCtrl+1' },
+  { label: '学生管理', view: 'students', accelerator: 'CmdOrCtrl+2' },
+  { label: '班级管理', view: 'classes', accelerator: 'CmdOrCtrl+3' },
+  { label: '备课中心', view: 'prep', accelerator: 'CmdOrCtrl+4' },
+  { label: '授课中心', view: 'teaching', accelerator: 'CmdOrCtrl+5' },
+  { label: '课后中心', view: 'post', accelerator: 'CmdOrCtrl+6' },
+  { label: '设置', view: 'settings', accelerator: 'CmdOrCtrl+7' }
 ]
 
 /**
@@ -34,22 +35,22 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): Menu {
       submenu: [
         {
           label: '新增',
-          accelerator: 'Ctrl+N',
+          accelerator: 'CmdOrCtrl+N',
           click: () => sendAction(getWindow(), { type: 'new-item' })
         },
         { type: 'separator' },
         {
           label: '导出数据',
-          accelerator: 'Ctrl+Shift+E',
+          accelerator: 'CmdOrCtrl+Shift+E',
           click: () => sendAction(getWindow(), { type: 'export-data' })
         },
         {
           label: '导入数据',
-          accelerator: 'Ctrl+Shift+I',
+          accelerator: 'CmdOrCtrl+Shift+O',
           click: () => sendAction(getWindow(), { type: 'import-data' })
         },
         { type: 'separator' },
-        { label: '退出', accelerator: 'Ctrl+Q', role: 'quit' }
+        { label: '退出', accelerator: 'CmdOrCtrl+Q', role: 'quit' }
       ]
     },
     // ============ 编辑菜单 ============
@@ -71,45 +72,45 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): Menu {
       submenu: [
         {
           label: '刷新当前视图',
-          accelerator: 'Ctrl+R',
+          accelerator: 'CmdOrCtrl+R',
           click: () => sendAction(getWindow(), { type: 'refresh' })
         },
         {
           label: '折叠/展开侧栏',
-          accelerator: 'Ctrl+B',
+          accelerator: 'CmdOrCtrl+B',
           click: () => sendAction(getWindow(), { type: 'toggle-sidebar' })
         },
         { type: 'separator' },
         {
           label: '放大',
-          accelerator: 'Ctrl+=',
+          accelerator: 'CmdOrCtrl+=',
           click: () => sendAction(getWindow(), { type: 'zoom-in' })
         },
         {
           label: '缩小',
-          accelerator: 'Ctrl+-',
+          accelerator: 'CmdOrCtrl+-',
           click: () => sendAction(getWindow(), { type: 'zoom-out' })
         },
         {
           label: '重置缩放',
-          accelerator: 'Ctrl+0',
+          accelerator: 'CmdOrCtrl+0',
           click: () => sendAction(getWindow(), { type: 'zoom-reset' })
         },
         { type: 'separator' },
         {
           label: '重载窗口',
-          accelerator: 'Ctrl+Shift+R',
+          accelerator: 'CmdOrCtrl+Shift+R',
           click: () => {
             const win = getWindow()
             if (win && !win.isDestroyed()) win.reload()
           }
         },
-        // 开发者工具仅在开发环境显示
+        // 开发者工具仅在开发环境显示（用 F12 避免与"导入数据"快捷键冲突）
         ...(isDev
           ? [
               {
                 label: '开发者工具',
-                accelerator: 'Ctrl+Shift+I',
+                accelerator: 'F12',
                 click: () => {
                   const win = getWindow()
                   if (win && !win.isDestroyed()) win.webContents.toggleDevTools()
@@ -156,8 +157,14 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): Menu {
         {
           label: '打开日志目录',
           click: () => {
+            // 打开 userData/logs 子目录（日志文件实际存放位置）
             shell
-              .openPath(app.getPath('userData'))
+              .openPath(join(app.getPath('userData'), 'logs'))
+              .then((err) => {
+                if (err) {
+                  getLogger().error('menu', '打开日志目录失败', { error: err })
+                }
+              })
               .catch((e) => getLogger().error('menu', '打开日志目录失败', { error: e }))
           }
         },

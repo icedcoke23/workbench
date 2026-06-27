@@ -256,7 +256,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, h } from 'vue'
+import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import { message, Modal, Empty } from 'ant-design-vue'
 import {
   TeamOutlined,
@@ -560,10 +560,15 @@ async function onDrop(status: TodoStatus): Promise<void> {
   }
 }
 
+let offRefresh: (() => void) | null = null
 onMounted(() => {
   loadDashboard()
   // 订阅全局刷新事件，刷新时重新加载仪表盘
-  subscribeRefresh(loadDashboard)
+  offRefresh = subscribeRefresh(loadDashboard)
+})
+onUnmounted(() => {
+  offRefresh?.()
+  offRefresh = null
 })
 </script>
 
