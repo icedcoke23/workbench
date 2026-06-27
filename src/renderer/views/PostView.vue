@@ -417,7 +417,7 @@ function copyTemplate(record: FeedbackTemplate): void {
   }
   let content = record.content
   for (const [k, v] of Object.entries(variables)) {
-    content = content.replaceAll(k, v)
+    content = content.split(k).join(v)
   }
   if (activeTab.value === 'weekly') {
     previewText.value = (previewText.value ? previewText.value + '\n\n' : '') + content
