@@ -26,16 +26,35 @@ export function list(q?: PageQuery): Student[] {
   const limit = q?.pageSize ?? 1000
   const offset = ((q?.page ?? 1) - 1) * limit
   const keyword = q?.keyword?.trim()
+  const tag = q?.tag?.trim()
+
+  // 同时支持关键词与标签筛选（标签存储为 JSON 数组，用 LIKE 匹配）
+  const conditions: string[] = []
+  const params: unknown[] = []
   if (keyword) {
-    return db()
-      .prepare(`SELECT * FROM students WHERE name LIKE ? ORDER BY name LIMIT ? OFFSET ?`)
-      .all(`%${keyword}%`, limit, offset)
-      .map((r) => mapRow(r as StudentRow))
+    conditions.push('name LIKE ?')
+    params.push(`%${keyword}%`)
   }
-  return db()
-    .prepare(`SELECT * FROM students ORDER BY name LIMIT ? OFFSET ?`)
-    .all(limit, offset)
-    .map((r) => mapRow(r as StudentRow))
+  if (tag) {
+    conditions.push('tags LIKE ?')
+    params.push(`%"${tag.replace(/"/g, '\\"')}"%`)
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  const rows = db()
+    .prepare(`SELECT * FROM students ${where} ORDER BY name LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset)
+  return rows.map((r) => mapRow(r as StudentRow))
+}
+
+/** 获取所有学生已使用过的标签（去重） */
+export function allTags(): string[] {
+  const rows = db().prepare(`SELECT tags FROM students`).all() as { tags: string | null }[]
+  const set = new Set<string>()
+  for (const r of rows) {
+    const tags = parseJSON<string[]>(r.tags, [])
+    for (const t of tags) set.add(t)
+  }
+  return Array.from(set).sort()
 }
 
 export function get(id: string): Student | null {

@@ -13,6 +13,7 @@ export interface PageQuery {
   page?: number
   pageSize?: number
   keyword?: string
+  tag?: string
 }
 export interface PageResult<T> {
   list: T[]

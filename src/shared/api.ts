@@ -33,6 +33,27 @@ import type {
   ScratchSettings
 } from './types'
 
+// API 命名空间与方法名清单（运行时常量，供 preload 生成显式方法）
+// 与 WorkbenchAPI 接口保持同步：新增方法时需同时更新此处
+export const API_METHODS: Record<string, string[]> = {
+  student: ['list', 'get', 'create', 'update', 'remove', 'allTags'],
+  class: ['list', 'get', 'create', 'update', 'remove', 'members', 'addMembers', 'removeMember'],
+  lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'records', 'score', 'pick'],
+  idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'removeVersion'],
+  todo: ['list', 'create', 'update', 'remove', 'regenerate'],
+  resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags'],
+  feedback: ['list', 'get', 'save', 'remove', 'generate', 'generateReport', 'exportPdf', 'sendWeChat'],
+  feedbackTemplate: ['list', 'create', 'update', 'remove'],
+  schedule: ['parseText', 'parseImage', 'import'],
+  scratch: ['launch', 'close', 'saveToIdea', 'saveToResource', 'pickResourceFile'],
+  settings: ['get', 'saveAI', 'saveSync', 'saveWeChat', 'saveScratch', 'testAI', 'testSync', 'syncNow'],
+  dashboard: ['get'],
+  data: ['export', 'importFromFile', 'pickImportFile', 'saveExportToFile'],
+  studentHistory: ['get'],
+  doc: ['openUrl', 'linkToLesson', 'listLinks'],
+  file: ['pickImage', 'saveAvatar', 'readImageBase64']
+}
+
 // 渲染进程可调用的全部 API 契约（preload 实现，主进程响应）
 export interface WorkbenchAPI {
   // 学生
@@ -42,6 +63,7 @@ export interface WorkbenchAPI {
     create: (input: StudentInput) => Promise<Result<Student>>
     update: (id: ID, input: Partial<StudentInput>) => Promise<Result<Student>>
     remove: (id: ID) => Promise<Result<void>>
+    allTags: () => Promise<Result<string[]>>
   }
   // 班级
   class: {

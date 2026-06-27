@@ -77,16 +77,57 @@ export async function launch(versionId?: string): Promise<void> {
     if (scratchWin === win) scratchWin = null
   })
 
+  const target = resolveGuiTarget(settings.guiUrl)
   try {
-    await win.loadURL(settings.guiUrl)
+    if (target.type === 'url') {
+      await win.loadURL(target.url)
+    } else {
+      await win.loadFile(target.path)
+    }
   } catch (e) {
     console.error('[scratch] 加载 Scratch GUI 失败', e)
     if (!win.isDestroyed()) win.destroy()
     scratchWin = null
-    throw new Error('无法加载 Scratch 编辑器，请检查设置中的 GUI 地址')
+    throw new Error(
+      target.type === 'url'
+        ? '无法加载 Scratch 编辑器，请检查设置中的 GUI 地址'
+        : '无法加载内置 Scratch 编辑器，请在「设置 → Scratch」中配置外部 GUI 地址'
+    )
   }
 
   if (versionId) await loadVersionInto(win, versionId)
+}
+
+/**
+ * 解析 Scratch GUI 加载目标：
+ * 1) http(s) URL → loadURL（外部服务）
+ * 2) 本地文件路径 → loadFile（用户自定义打包版本）
+ * 3) 内置打包版本 → loadFile（resources/scratch-gui/index.html）
+ * 4) 全部缺失 → 抛出明确错误，提示用户在设置中配置
+ */
+function resolveGuiTarget(
+  guiUrl: string
+): { type: 'url'; url: string } | { type: 'file'; path: string } {
+  const url = (guiUrl || '').trim()
+  if (/^https?:\/\//i.test(url)) {
+    return { type: 'url', url }
+  }
+  // 内置打包版本（packaged: resourcesPath/scratch-gui；dev: resources/scratch-gui）
+  const builtinDir = app.isPackaged
+    ? join(process.resourcesPath, 'scratch-gui')
+    : join(app.getAppPath(), 'resources', 'scratch-gui')
+  const builtinIndex = join(builtinDir, 'index.html')
+  if (existsSync(builtinIndex)) {
+    // 若用户填写的是本地路径且存在，优先使用；否则使用内置版本
+    if (url && existsSync(url)) return { type: 'file', path: url }
+    return { type: 'file', path: builtinIndex }
+  }
+  if (url && existsSync(url)) {
+    return { type: 'file', path: url }
+  }
+  throw new Error(
+    '未找到 Scratch 编辑器：内置版本缺失且未配置 GUI 地址。请前往「设置 → Scratch」填写本地路径或服务地址。'
+  )
 }
 
 /** 读取版本 .sb3 的 project.json 并注入到指定窗口 */

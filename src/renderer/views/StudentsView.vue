@@ -2,13 +2,23 @@
   <div class="page-container">
     <!-- 工具栏 -->
     <div class="toolbar">
-      <a-input-search
-        v-model:value="keyword"
-        placeholder="按姓名搜索学生"
-        style="width: 240px"
-        allow-clear
-        @search="loadStudents"
-      />
+      <a-space>
+        <a-input-search
+          v-model:value="keyword"
+          placeholder="按姓名搜索学生"
+          style="width: 240px"
+          allow-clear
+          @search="loadStudents"
+        />
+        <a-select
+          v-model:value="selectedTag"
+          placeholder="按标签筛选"
+          style="width: 160px"
+          allow-clear
+          :options="tagOptions"
+          @change="loadStudents"
+        />
+      </a-space>
       <a-space>
         <a-button @click="loadStudents"><ReloadOutlined /> 刷新</a-button>
         <a-button type="primary" @click="openCreate"><PlusOutlined /> 新增学生</a-button>
@@ -71,6 +81,21 @@
       @ok="submitForm"
     >
       <a-form layout="vertical">
+        <a-form-item label="头像">
+          <div class="avatar-upload">
+            <a-avatar :size="64" :src="form.avatarPreview || undefined">
+              {{ form.avatarPreview ? '' : form.name.charAt(0) || '?' }}
+            </a-avatar>
+            <a-space direction="vertical" :size="4">
+              <a-button size="small" :loading="uploadingAvatar" @click="pickAvatar">
+                <PictureOutlined /> 选择图片
+              </a-button>
+              <a-button v-if="form.avatarPath" size="small" type="link" danger @click="clearAvatar">
+                移除头像
+              </a-button>
+            </a-space>
+          </div>
+        </a-form-item>
         <a-form-item label="姓名" required>
           <a-input v-model:value="form.name" placeholder="请输入学生姓名" />
         </a-form-item>
@@ -101,7 +126,8 @@ import {
   ReloadOutlined,
   EditOutlined,
   DeleteOutlined,
-  HistoryOutlined
+  HistoryOutlined,
+  PictureOutlined
 } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { call } from '@renderer/api'
@@ -112,6 +138,8 @@ import type { Student, StudentInput } from '@shared/types'
 const students = ref<Student[]>([])
 const loading = ref(false)
 const keyword = ref('')
+const selectedTag = ref<string | undefined>(undefined)
+const tagOptions = ref<{ label: string; value: string }[]>([])
 
 const columns = [
   { title: '姓名', key: 'name' },
@@ -125,10 +153,19 @@ const columns = [
 const formVisible = ref(false)
 const submitting = ref(false)
 const editingId = ref<string | null>(null)
-const form = reactive<{ name: string; grade: string; tags: string[] }>({
+const uploadingAvatar = ref(false)
+const form = reactive<{
+  name: string
+  grade: string
+  tags: string[]
+  avatarPath: string | null
+  avatarPreview: string
+}>({
   name: '',
   grade: '',
-  tags: []
+  tags: [],
+  avatarPath: null,
+  avatarPreview: ''
 })
 
 // 学习历史抽屉
@@ -142,9 +179,17 @@ function formatDate(d: string): string {
 async function loadStudents(): Promise<void> {
   loading.value = true
   try {
-    students.value = await call(
-      window.api.student.list({ keyword: keyword.value.trim() || undefined })
-    )
+    const [list, tags] = await Promise.all([
+      call(
+        window.api.student.list({
+          keyword: keyword.value.trim() || undefined,
+          tag: selectedTag.value || undefined
+        })
+      ),
+      call(window.api.student.allTags())
+    ])
+    students.value = list
+    tagOptions.value = (tags || []).map((t) => ({ label: t, value: t }))
   } catch (e) {
     message.error(String(e))
   } finally {
@@ -152,10 +197,33 @@ async function loadStudents(): Promise<void> {
   }
 }
 
+async function pickAvatar(): Promise<void> {
+  uploadingAvatar.value = true
+  try {
+    const srcPath = await call(window.api.file.pickImage())
+    if (!srcPath) return
+    const savedPath = await call(window.api.file.saveAvatar(srcPath, form.name || 'student'))
+    form.avatarPath = savedPath
+    form.avatarPreview = await call(window.api.file.readImageBase64(savedPath))
+    message.success('头像已选择')
+  } catch (e) {
+    message.error(`头像上传失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    uploadingAvatar.value = false
+  }
+}
+
+function clearAvatar(): void {
+  form.avatarPath = null
+  form.avatarPreview = ''
+}
+
 function resetForm(): void {
   form.name = ''
   form.grade = ''
   form.tags = []
+  form.avatarPath = null
+  form.avatarPreview = ''
   editingId.value = null
 }
 
@@ -164,11 +232,21 @@ function openCreate(): void {
   formVisible.value = true
 }
 
-function openEdit(record: Student): void {
+async function openEdit(record: Student): Promise<void> {
   editingId.value = record.id
   form.name = record.name
   form.grade = record.grade || ''
   form.tags = [...(record.tags || [])]
+  form.avatarPath = record.avatarPath || null
+  form.avatarPreview = ''
+  // 加载已有头像预览
+  if (record.avatarPath) {
+    try {
+      form.avatarPreview = await call(window.api.file.readImageBase64(record.avatarPath))
+    } catch {
+      // 头像文件可能已丢失，忽略错误
+    }
+  }
   formVisible.value = true
 }
 
@@ -180,7 +258,8 @@ async function submitForm(): Promise<void> {
   const input: StudentInput = {
     name: form.name.trim(),
     grade: form.grade.trim() || undefined,
-    tags: form.tags
+    tags: form.tags,
+    avatarPath: form.avatarPath
   }
   submitting.value = true
   try {
@@ -245,5 +324,10 @@ onUnmounted(() => {
 }
 .text-muted {
   color: #9ca3af;
+}
+.avatar-upload {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 </style>

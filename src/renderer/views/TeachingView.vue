@@ -76,6 +76,10 @@
             </span>
           </div>
           <a-space>
+            <a-button size="large" :loading="launchingScratch" @click="launchScratch">
+              <template #icon><CodeOutlined /></template>
+              打开 Scratch
+            </a-button>
             <a-button type="primary" size="large" :loading="picking" @click="randomPick">
               <template #icon><ThunderboltOutlined /></template>
               随机点名
@@ -183,7 +187,8 @@ import {
   PoweroffOutlined,
   CloseOutlined,
   ThunderboltOutlined,
-  ClockCircleOutlined
+  ClockCircleOutlined,
+  CodeOutlined
 } from '@ant-design/icons-vue'
 import { call } from '@renderer/api'
 import { subscribeRefresh } from '@renderer/composables/useShortcuts'
@@ -393,6 +398,7 @@ const classLoading = ref(false)
 const lessonLoading = ref(false)
 const studentLoading = ref(false)
 const picking = ref(false)
+const launchingScratch = ref(false)
 
 const totals = ref<Record<string, number>>({})
 const openId = ref<string | null>(null)
@@ -525,6 +531,20 @@ async function randomPick(): Promise<void> {
     message.error(String(e))
   } finally {
     picking.value = false
+  }
+}
+
+async function launchScratch(): Promise<void> {
+  launchingScratch.value = true
+  try {
+    // 若当前课次关联了点子版本，则加载该版本；否则打开空白编辑器
+    const versionId = teachingLesson.value?.ideaVersionId || undefined
+    await call(window.api.scratch.launch(versionId))
+    message.success('已打开 Scratch 编辑器')
+  } catch (e) {
+    message.error(`启动失败：${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    launchingScratch.value = false
   }
 }
 

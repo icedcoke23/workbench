@@ -33,6 +33,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('student:create', (_e, input) => tryRun(() => studentRepo.create(input)))
   ipcMain.handle('student:update', (_e, id, input) => tryRun(() => studentRepo.update(id, input)))
   ipcMain.handle('student:remove', (_e, id) => tryRun(() => studentRepo.remove(id)))
+  ipcMain.handle('student:allTags', () => tryRun(() => studentRepo.allTags()))
 
   // ============ 班级 ============
   ipcMain.handle('class:list', (_e, q) => tryRun(() => classRepo.list(q)))

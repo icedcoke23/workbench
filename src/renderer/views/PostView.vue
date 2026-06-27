@@ -149,26 +149,132 @@
           <iframe v-if="reportHtml" :srcdoc="reportHtml" class="report-frame" />
         </a-card>
       </a-tab-pane>
+
+      <!-- ============ 模板库 ============ -->
+      <a-tab-pane key="templates" tab="模板库">
+        <a-space style="margin-bottom: 16px">
+          <a-select
+            v-model:value="templateCategory"
+            placeholder="按分类筛选"
+            style="width: 160px"
+            allow-clear
+            :options="categoryOptions"
+            @change="loadTemplates"
+          />
+          <a-button type="primary" @click="openCreateTemplate">
+            <PlusOutlined /> 新增模板
+          </a-button>
+          <a-button @click="loadTemplates"><ReloadOutlined /> 刷新</a-button>
+        </a-space>
+
+        <a-table
+          :data-source="templates"
+          :columns="templateColumns"
+          :loading="templateLoading"
+          :pagination="{ pageSize: 10, size: 'small' }"
+          size="small"
+          row-key="id"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'category'">
+              <a-tag :color="categoryColor(record.category)">
+                {{ categoryLabel(record.category) }}
+              </a-tag>
+            </template>
+            <template v-else-if="column.key === 'content'">
+              <div class="template-content-preview">{{ record.content.slice(0, 80) }}{{ record.content.length > 80 ? '...' : '' }}</div>
+            </template>
+            <template v-else-if="column.key === 'isBuiltin'">
+              <a-tag v-if="record.isBuiltin" color="blue">内置</a-tag>
+              <a-tag v-else color="default">自定义</a-tag>
+            </template>
+            <template v-else-if="column.key === 'action'">
+              <a-space :size="4">
+                <a-button type="link" size="small" @click="copyTemplate(record)">
+                  <CopyOutlined /> 复制
+                </a-button>
+                <a-button type="link" size="small" :disabled="record.isBuiltin" @click="openEditTemplate(record)">
+                  <EditOutlined /> 编辑
+                </a-button>
+                <a-popconfirm
+                  :title="record.isBuiltin ? '内置模板不可删除' : '确认删除该模板？'"
+                  :disabled="record.isBuiltin"
+                  @confirm="removeTemplate(record.id)"
+                >
+                  <a-button type="link" size="small" danger :disabled="record.isBuiltin">
+                    <DeleteOutlined /> 删除
+                  </a-button>
+                </a-popconfirm>
+              </a-space>
+            </template>
+          </template>
+        </a-table>
+
+        <!-- 模板新增/编辑 Modal -->
+        <a-modal
+          v-model:open="templateFormVisible"
+          :title="editingTemplateId ? '编辑模板' : '新增模板'"
+          :confirm-loading="templateSubmitting"
+          ok-text="保存"
+          cancel-text="取消"
+          @ok="submitTemplateForm"
+        >
+          <a-form layout="vertical">
+            <a-form-item label="模板名称" required>
+              <a-input v-model:value="templateForm.name" placeholder="如：积极表现表扬" />
+            </a-form-item>
+            <a-form-item label="分类">
+              <a-select
+                v-model:value="templateForm.category"
+                :options="categoryOptions"
+                placeholder="选择分类"
+              />
+            </a-form-item>
+            <a-form-item label="模板内容" required>
+              <a-textarea
+                v-model:value="templateForm.content"
+                :rows="6"
+                placeholder="支持变量占位符：{student_name} {class_name} {date}"
+              />
+              <div class="form-hint">
+                可用变量：{'{student_name}'} 学生姓名、{'{class_name}'} 班级名称、{'{date}'} 当前日期
+              </div>
+            </a-form-item>
+          </a-form>
+        </a-modal>
+      </a-tab-pane>
     </a-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   ThunderboltOutlined,
   SaveOutlined,
   FilePdfOutlined,
   WechatOutlined,
-  FolderOpenOutlined
+  FolderOpenOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  CopyOutlined
 } from '@ant-design/icons-vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import { call } from '@renderer/api'
 import { subscribeRefresh } from '@renderer/composables/useShortcuts'
-import type { ClassInfo, Feedback, Lesson } from '@shared/types'
+import type {
+  ClassInfo,
+  Feedback,
+  FeedbackTemplate,
+  FeedbackTemplateCategory,
+  FeedbackTemplateInput,
+  Lesson
+} from '@shared/types'
 
-const activeTab = ref<'weekly' | 'quarterly'>('weekly')
+const activeTab = ref<'weekly' | 'quarterly' | 'templates'>('weekly')
 
 // 周反馈
 const classes = ref<ClassInfo[]>([])
@@ -190,6 +296,139 @@ const dateRange = ref<[Dayjs, Dayjs] | undefined>()
 const reportHtml = ref('')
 const reportPdfPath = ref('')
 const reporting = ref(false)
+
+// 模板库
+const templates = ref<FeedbackTemplate[]>([])
+const templateLoading = ref(false)
+const templateCategory = ref<FeedbackTemplateCategory | undefined>(undefined)
+const templateFormVisible = ref(false)
+const templateSubmitting = ref(false)
+const editingTemplateId = ref<string | null>(null)
+const templateForm = reactive({
+  name: '',
+  category: 'custom' as FeedbackTemplateCategory,
+  content: ''
+})
+
+const categoryOptions = [
+  { label: '通用', value: 'general' },
+  { label: '表扬', value: 'praise' },
+  { label: '建议', value: 'suggestion' },
+  { label: '进步', value: 'progress' },
+  { label: '自定义', value: 'custom' }
+]
+
+const templateColumns = [
+  { title: '名称', dataIndex: 'name', key: 'name' },
+  { title: '分类', key: 'category', width: 90 },
+  { title: '内容预览', key: 'content' },
+  { title: '类型', key: 'isBuiltin', width: 80 },
+  { title: '操作', key: 'action', width: 220, fixed: 'right' as const }
+]
+
+function categoryLabel(c: FeedbackTemplateCategory): string {
+  return categoryOptions.find((o) => o.value === c)?.label || c
+}
+
+function categoryColor(c: FeedbackTemplateCategory): string {
+  const map: Record<FeedbackTemplateCategory, string> = {
+    general: 'blue',
+    praise: 'green',
+    suggestion: 'orange',
+    progress: 'purple',
+    custom: 'default'
+  }
+  return map[c] || 'default'
+}
+
+async function loadTemplates(): Promise<void> {
+  templateLoading.value = true
+  try {
+    templates.value = await call(
+      window.api.feedbackTemplate.list({ category: templateCategory.value })
+    )
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    templateLoading.value = false
+  }
+}
+
+function openCreateTemplate(): void {
+  editingTemplateId.value = null
+  templateForm.name = ''
+  templateForm.category = 'custom'
+  templateForm.content = ''
+  templateFormVisible.value = true
+}
+
+function openEditTemplate(record: FeedbackTemplate): void {
+  editingTemplateId.value = record.id
+  templateForm.name = record.name
+  templateForm.category = record.category
+  templateForm.content = record.content
+  templateFormVisible.value = true
+}
+
+async function submitTemplateForm(): Promise<void> {
+  if (!templateForm.name.trim() || !templateForm.content.trim()) {
+    message.warning('请填写模板名称和内容')
+    return
+  }
+  const input: FeedbackTemplateInput = {
+    name: templateForm.name.trim(),
+    category: templateForm.category,
+    content: templateForm.content
+  }
+  templateSubmitting.value = true
+  try {
+    if (editingTemplateId.value) {
+      await call(window.api.feedbackTemplate.update(editingTemplateId.value, input))
+      message.success('已更新')
+    } else {
+      await call(window.api.feedbackTemplate.create(input))
+      message.success('已新增')
+    }
+    templateFormVisible.value = false
+    await loadTemplates()
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    templateSubmitting.value = false
+  }
+}
+
+async function removeTemplate(id: string): Promise<void> {
+  try {
+    await call(window.api.feedbackTemplate.remove(id))
+    message.success('已删除')
+    await loadTemplates()
+  } catch (e) {
+    message.error(String(e))
+  }
+}
+
+function copyTemplate(record: FeedbackTemplate): void {
+  // 将模板内容追加到反馈编辑区（若在周反馈 tab）
+  const variables: Record<string, string> = {
+    '{student_name}': '某同学',
+    '{class_name}': classId.value ? classes.value.find((c) => c.id === classId.value)?.name || '' : '',
+    '{date}': dayjs().format('YYYY-MM-DD')
+  }
+  let content = record.content
+  for (const [k, v] of Object.entries(variables)) {
+    content = content.replaceAll(k, v)
+  }
+  if (activeTab.value === 'weekly') {
+    previewText.value = (previewText.value ? previewText.value + '\n\n' : '') + content
+    message.success('已插入到反馈内容')
+  } else {
+    // 切换到周反馈 tab 并插入
+    activeTab.value = 'weekly'
+    previewText.value = (previewText.value ? previewText.value + '\n\n' : '') + content
+    message.success('已切换到周反馈并插入模板内容')
+  }
+}
 
 const classOptions = computed(() =>
   classes.value.map((c) => ({ label: c.name, value: c.id }))
@@ -418,5 +657,15 @@ onUnmounted(() => {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   background: #fff;
+}
+.template-content-preview {
+  color: #6b7280;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.form-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #9ca3af;
 }
 </style>
