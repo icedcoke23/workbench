@@ -640,6 +640,34 @@
             style="width: 200px"
           />
         </a-form-item>
+
+        <!-- AI 辅助生成教案草稿 -->
+        <div class="plan-ai-toolbar">
+          <a-button
+            type="primary"
+            ghost
+            :loading="planAiGenerating"
+            :disabled="!canGeneratePlanDraft"
+            @click="generatePlanDraft"
+          >
+            <template #icon><ThunderboltOutlined /></template>
+            AI 生成教案草稿
+          </a-button>
+          <span v-if="!aiConfigured" class="plan-ai-hint">
+            未配置 AI，请在「设置」中配置第三方 AI 参数
+          </span>
+          <span v-else-if="!planForm.ideaVersionId" class="plan-ai-hint">
+            请先选择关联版本
+          </span>
+          <span v-else-if="planAiGenerating" class="plan-ai-hint">
+            正在生成…
+          </span>
+        </div>
+        <div v-if="planAiGenerating && planAiDraftText" class="plan-ai-preview">
+          <div class="plan-ai-preview-label">AI 实时输出：</div>
+          <pre class="plan-ai-preview-text">{{ planAiDraftText }}</pre>
+        </div>
+
         <a-collapse
           :default-active-key="['objectives', 'process']"
           class="plan-collapse"
@@ -710,9 +738,10 @@ import {
   EditOutlined,
   EyeOutlined,
   FormOutlined,
-  ScheduleOutlined
+  ScheduleOutlined,
+  ThunderboltOutlined
 } from '@ant-design/icons-vue'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { call } from '@renderer/api'
 import { subscribeRefresh, subscribeNewItem } from '@renderer/composables/useShortcuts'
@@ -814,6 +843,10 @@ const planEditorVisible = ref(false)
 const planEditorIsEdit = ref(false)
 const planEditorVersionHasPlan = ref(false)
 const planSubmitting = ref(false)
+// AI 辅助生成教案草稿
+const planAiGenerating = ref(false)
+const aiConfigured = ref(false)
+const planAiDraftText = ref('')
 const planForm = reactive<{
   ideaVersionId: string | undefined
   ideaId: string | undefined
@@ -990,6 +1023,103 @@ async function submitPlan(): Promise<void> {
     message.error(`保存失败：${String(e instanceof Error ? e.message : e)}`)
   } finally {
     planSubmitting.value = false
+  }
+}
+
+/**
+ * 将 AI 返回的 Markdown 教案文本按二级标题切分为 5 个章节。
+ * 兼容 ## / ### 与「教学重难点/重难点/教学重点」「课后反思/教学反思/反思」等变体。
+ */
+function splitLessonPlanMarkdown(text: string): {
+  objectives: string
+  keyPoints: string
+  preparation: string
+  process: string
+  reflection: string
+} {
+  const sections = {
+    objectives: '',
+    keyPoints: '',
+    preparation: '',
+    process: '',
+    reflection: ''
+  }
+  const headerMap: Array<{ key: keyof typeof sections; pattern: RegExp }> = [
+    { key: 'objectives', pattern: /^#{1,3}\s*教学目标\s*$/ },
+    { key: 'keyPoints', pattern: /^#{1,3}\s*(教学重难点|重难点|教学重点|重点难点)\s*$/ },
+    { key: 'preparation', pattern: /^#{1,3}\s*教学准备\s*$/ },
+    { key: 'process', pattern: /^#{1,3}\s*教学过程\s*$/ },
+    { key: 'reflection', pattern: /^#{1,3}\s*(课后反思|教学反思|反思)\s*$/ }
+  ]
+  let current: keyof typeof sections | null = null
+  for (const line of text.split('\n')) {
+    const matched = headerMap.find((h) => h.pattern.test(line.trim()))
+    if (matched) {
+      current = matched.key
+      continue
+    }
+    if (current) {
+      sections[current] += line + '\n'
+    }
+  }
+  for (const k of Object.keys(sections) as Array<keyof typeof sections>) {
+    sections[k] = sections[k].trim()
+  }
+  return sections
+}
+
+/** AI 是否可生成草稿：已选关联版本且 AI 已配置且未在生成中 */
+const canGeneratePlanDraft = computed(
+  () => !!planForm.ideaVersionId && aiConfigured.value && !planAiGenerating.value
+)
+
+/** 触发 AI 生成教案草稿（流式） */
+async function generatePlanDraft(): Promise<void> {
+  if (!planForm.ideaVersionId) {
+    message.warning('请先选择关联版本')
+    return
+  }
+  // 任一章节已有内容时确认覆盖
+  const hasContent =
+    planForm.objectives ||
+    planForm.keyPoints ||
+    planForm.preparation ||
+    planForm.process ||
+    planForm.reflection
+  if (hasContent) {
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: 'AI 生成将覆盖现有教案',
+        content: 'AI 草稿会替换当前 5 个章节的内容，是否继续？',
+        okText: '覆盖并生成',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false)
+      })
+    })
+    if (!confirmed) return
+  }
+
+  planAiGenerating.value = true
+  planAiDraftText.value = ''
+  try {
+    const full = await call(
+      window.api.lessonPlan.generateDraft(planForm.ideaVersionId, planForm.durationMinutes)
+    )
+    // 流式期间 chunk 已累加到 planAiDraftText，这里以最终返回值为准切分
+    const sections = splitLessonPlanMarkdown(full || planAiDraftText.value)
+    if (sections.objectives) planForm.objectives = sections.objectives
+    if (sections.keyPoints) planForm.keyPoints = sections.keyPoints
+    if (sections.preparation) planForm.preparation = sections.preparation
+    if (sections.process) planForm.process = sections.process
+    if (sections.reflection) planForm.reflection = sections.reflection
+    message.success('教案草稿已生成，请检查并按需调整')
+  } catch (e) {
+    message.error(`AI 生成失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    planAiGenerating.value = false
+    planAiDraftText.value = ''
   }
 }
 
@@ -1481,6 +1611,9 @@ let offScratchSave: (() => void) | null = null
 // 全局刷新与新增项订阅取消函数
 let offRefresh: (() => void) | null = null
 let offNewItem: (() => void) | null = null
+// 教案草稿流式 chunk 订阅
+type PlanChunkRegistrar = (cb: (delta: string) => void) => () => void
+let offPlanChunk: (() => void) | null = null
 
 onMounted(() => {
   loadIdeas()
@@ -1494,6 +1627,21 @@ onMounted(() => {
   offScratchSave = subscribe((payload) => {
     handleScratchSave(payload)
   })
+
+  // 订阅教案草稿流式输出：累加到 planAiDraftText 供实时预览
+  offPlanChunk = (window.events['lessonPlan:chunk'] as unknown as PlanChunkRegistrar)((delta) => {
+    if (delta === '[DONE]') return
+    planAiDraftText.value += delta
+  })
+
+  // 检测 AI 是否已配置，控制「AI 生成草稿」按钮可用性
+  call(window.api.settings.get())
+    .then((s) => {
+      aiConfigured.value = !!(s.ai.useCustomAI && s.ai.apiKey)
+    })
+    .catch(() => {
+      aiConfigured.value = false
+    })
 
   // 订阅全局刷新事件：刷新时重新加载点子库、资源库、标签、课次、文档、教案
   offRefresh = subscribeRefresh(() => {
@@ -1515,6 +1663,8 @@ onUnmounted(() => {
   offRefresh = null
   offNewItem?.()
   offNewItem = null
+  offPlanChunk?.()
+  offPlanChunk = null
 })
 </script>
 
@@ -1742,5 +1892,38 @@ onUnmounted(() => {
 }
 .plan-collapse :deep(.ant-collapse-header) {
   font-weight: 500;
+}
+.plan-ai-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 8px;
+}
+.plan-ai-hint {
+  font-size: 12px;
+  color: #9ca3af;
+}
+.plan-ai-preview {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #f6f8fa;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+.plan-ai-preview-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+.plan-ai-preview-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
 }
 </style>

@@ -1,5 +1,7 @@
 // AI 提示词（迁移自 Feed 项目并适配工作台 Scratch 教学场景）
 
+import type { VersionMeta } from '@shared/types'
+
 export const DEFAULT_MODEL = 'glm-4-flash'
 export const DEFAULT_VISION_MODEL = 'glm-4v-flash'
 
@@ -108,4 +110,80 @@ export function buildWeeklyFeedbackUserMessage(params: {
 ${scoreList || '无积分记录'}
 ${planSection}
 请基于以上数据生成本次课堂的教学反馈，按报告结构输出。`
+}
+
+// ============ AI 辅助生成教案草稿 ============
+
+export function getLessonPlanSystemPrompt(): string {
+  return `你是一位资深的少儿编程教学设计师，擅长基于 Scratch 作品设计结构化、可落地的编程课教案。请根据给定的作品元信息与点子描述，生成一份完整的 Scratch 编程课教案草稿。
+
+## 输出格式（严格使用 Markdown 二级标题，每个章节独占一行标题，不要前后多余文字）
+
+## 教学目标
+（2-4 条，每条以「- 」开头，覆盖知识与技能、过程与方法、情感态度价值观）
+
+## 教学重难点
+（重点与难点各 1-2 条，以「- 重点：」「- 难点：」开头）
+
+## 教学准备
+（列出所需素材、角色、背景、音效、学具等，以「- 」开头）
+
+## 教学过程
+（分环节撰写，每个环节用「### 环节名（约X分钟）」作为三级标题，至少包含导入、新授、实践创作、展示交流、课堂总结等环节；每环节简述教师活动与学生活动）
+
+## 课后反思
+（预留 1-2 条反思方向，以「- 」开头，供教师课后填写，内容留空或写提示性问题）
+
+## 撰写要求
+- 语言简洁专业，适合 8-12 岁青少年 Scratch 课堂
+- 结合作品中实际出现的角色名、脚本功能设计教学环节与示例
+- 教学过程总时长需与给定「预计时长」匹配（未给定时按 60 分钟设计）
+- 只输出上述五个二级标题章节，章节顺序固定，不要添加额外标题或总述`
+}
+
+export function buildLessonPlanDraftUserMessage(params: {
+  ideaTitle?: string | null
+  ideaDescription?: string | null
+  versionName?: string | null
+  versionMeta: VersionMeta
+  durationMinutes?: number | null
+}): string {
+  const { ideaTitle, ideaDescription, versionName, versionMeta, durationMinutes } = params
+  const metaBlock = versionMeta.hasFile
+    ? `- 角色数：${versionMeta.spriteCount}${
+        versionMeta.spriteNames.length
+          ? `（${versionMeta.spriteNames.map((n) => `「${n}」`).join('、')}）`
+          : ''
+      }
+- 脚本数：${versionMeta.scriptCount}
+- 造型数：${versionMeta.costumeCount}
+- 音效数：${versionMeta.soundCount}
+- 文件大小：${formatBytes(versionMeta.fileSize)}`
+    : '（该版本暂无作品文件，请基于点子描述设计教学环节与示例）'
+
+  const durationLine = durationMinutes
+    ? `${durationMinutes} 分钟`
+    : '未指定（按 60 分钟设计）'
+
+  return `请基于以下信息生成一份 Scratch 编程课教案草稿。
+
+## 点子信息
+- 标题：${ideaTitle || '未命名点子'}
+- 版本名：${versionName || '默认版本'}
+- 点子描述：
+${ideaDescription || '（暂无描述，请结合作品元信息自由设计）'}
+
+## 作品元信息
+${metaBlock}
+
+## 课时信息
+- 预计时长：${durationLine}
+
+请按输出格式生成教案，确保教学过程环节总时长匹配预计时长。`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }

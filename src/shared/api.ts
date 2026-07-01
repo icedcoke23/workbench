@@ -44,7 +44,7 @@ export const API_METHODS: Record<string, string[]> = {
   class: ['list', 'get', 'create', 'update', 'remove', 'members', 'addMembers', 'removeMember'],
   lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'records', 'score', 'pick'],
   idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'updateVersion', 'removeVersion', 'getVersionMeta'],
-  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove'],
+  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'generateDraft'],
   todo: ['list', 'create', 'update', 'remove', 'regenerate'],
   resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags', 'readFile'],
   feedback: ['list', 'get', 'save', 'remove', 'generate', 'generateReport', 'exportPdf', 'sendWeChat'],
@@ -112,6 +112,7 @@ export interface WorkbenchAPI {
     getByVersion: (versionId: ID) => Promise<Result<LessonPlan | null>>
     upsert: (input: LessonPlanInput) => Promise<Result<LessonPlan>>
     remove: (id: ID) => Promise<Result<void>>
+    generateDraft: (versionId: ID, durationMinutes?: number | null) => Promise<Result<string>>
   }
   // 待办
   todo: {
@@ -209,6 +210,7 @@ export interface WorkbenchAPI {
 export interface WorkbenchEvents {
   'scratch:save-request': (cb: (payload: ScratchSavePayload) => void) => () => void
   'feedback:chunk': (cb: (delta: string) => void) => () => void
+  'lessonPlan:chunk': (cb: (delta: string) => void) => () => void
   'sync:status': (cb: (status: { running: boolean; message: string }) => void) => () => void
   'menu:action': (cb: (action: MenuAction) => void) => () => void
 }

@@ -21,6 +21,7 @@ import * as syncService from '../services/sync'
 import * as wechatService from '../services/wechat'
 import * as dataService from '../services/data'
 import * as historyService from '../services/history'
+import * as lessonPlanService from '../services/lesson-plan'
 import { resolveAISettings, invokeAI } from '../services/ai'
 import * as scratchService from '../services/scratch'
 import { app } from 'electron'
@@ -82,6 +83,16 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('lessonPlan:getByVersion', (_e, versionId) => tryRun(() => lessonPlanRepo.getByVersion(versionId)))
   ipcMain.handle('lessonPlan:upsert', (_e, input) => tryRun(() => lessonPlanRepo.upsert(input)))
   ipcMain.handle('lessonPlan:remove', (_e, id) => tryRun(() => lessonPlanRepo.remove(id)))
+  ipcMain.handle('lessonPlan:generateDraft', async (e, versionId, durationMinutes) =>
+    tryRunAsync(async () => {
+      const win = BrowserWindow.fromWebContents(e.sender) ?? getMainWindow()
+      const full = await lessonPlanService.generateDraft(versionId, durationMinutes, (delta) => {
+        win?.webContents.send('lessonPlan:chunk', delta)
+      })
+      win?.webContents.send('lessonPlan:chunk', '[DONE]')
+      return full
+    })
+  )
 
   // ============ 待办 ============
   ipcMain.handle('todo:list', () => tryRun(() => todoRepo.list()))
