@@ -276,6 +276,7 @@ export interface DashboardData {
     totalClasses: number
     weekLessonCount: number
     pendingFeedbackCount: number
+    pendingPrepCount: number
   }
   charts?: DashboardCharts
 }

@@ -1,5 +1,4 @@
 import { db, uuid } from '../db'
-import type { Lesson } from '@shared/types'
 import type { Todo } from '@shared/types'
 
 interface TodoRow {
@@ -71,36 +70,61 @@ export function removeByLesson(lessonId: string, type: Todo['type']): void {
   db().prepare(`DELETE FROM todos WHERE ref_lesson_id = ? AND type = ?`).run(lessonId, type)
 }
 
-/**
- * 根据规则自动生成待办：
- * - 备课待办：未来 24h 内课程未关联备课课件
- * - 反馈待办：已结束课程未发反馈（24h 有效期）
- */
-export function regenerateAuto(upcoming: Lesson[], finished: Lesson[]): Todo[] {
-  const tx = db().transaction(() => {
-    // 清理旧的自动待办（保留手动）
-    db().prepare(`DELETE FROM todos WHERE type IN ('prep','feedback')`).run()
+/** 自动待办业务规格：以 (type, refLessonId) 为键 */
+export interface AutoTodoSpec {
+  type: 'prep' | 'feedback'
+  refLessonId: string
+  title: string
+  dueAt: string | null
+}
 
-    const in24h = Date.now() + 24 * 3_600_000
-    for (const l of upcoming) {
-      const startTs = new Date(l.startTime).getTime()
-      if (startTs <= in24h && !l.ideaVersionId) {
-        create({
-          title: `备课待办：${l.className ?? '课程'} ${l.startTime}`,
-          type: 'prep',
-          refLessonId: l.id,
-          dueAt: l.startTime
-        })
+function autoTodoKey(type: string, refLessonId: string | null | undefined): string {
+  return `${type}:${refLessonId ?? ''}`
+}
+
+/**
+ * 同步自动待办（备课/反馈），以 (type, refLessonId) 为业务键做增量同步：
+ * - 已存在：仅更新 title/dueAt，**保留用户设置的 status**（避免每次重新生成丢失进度）
+ * - 不存在：新建（status='todo'）
+ * - 条件已不再成立的旧自动待办（不在 desired 列表中）：清理删除
+ * - 手动待办(type='manual')始终不受影响
+ */
+export function syncAutoTodos(desired: AutoTodoSpec[]): Todo[] {
+  const tx = db().transaction(() => {
+    const existing = (db()
+      .prepare(`SELECT * FROM todos WHERE type IN ('prep','feedback')`)
+      .all() as TodoRow[]).map(mapRow)
+    const existingMap = new Map<string, Todo>()
+    for (const t of existing) {
+      existingMap.set(autoTodoKey(t.type, t.refLessonId), t)
+    }
+    const desiredKeys = new Set(desired.map((d) => autoTodoKey(d.type, d.refLessonId)))
+
+    // 1. 清理条件已不成立的自动待办（如课次已完成备课/已发反馈）
+    for (const [key, t] of existingMap) {
+      if (!desiredKeys.has(key)) {
+        db().prepare(`DELETE FROM todos WHERE id = ?`).run(t.id)
       }
     }
-    for (const l of finished) {
-      if (!l.feedbackSent) {
-        const due = new Date(new Date(l.endTime).getTime() + 24 * 3_600_000).toISOString()
+
+    // 2. upsert：保留 status，仅同步 title/dueAt
+    for (const d of desired) {
+      const key = autoTodoKey(d.type, d.refLessonId)
+      const cur = existingMap.get(key)
+      if (cur) {
+        if (cur.title !== d.title || (cur.dueAt ?? null) !== (d.dueAt ?? null)) {
+          db().prepare(`UPDATE todos SET title = ?, due_at = ? WHERE id = ?`).run(
+            d.title,
+            d.dueAt,
+            cur.id
+          )
+        }
+      } else {
         create({
-          title: `反馈待办：${l.className ?? '课程'} ${l.startTime}`,
-          type: 'feedback',
-          refLessonId: l.id,
-          dueAt: due
+          title: d.title,
+          type: d.type,
+          refLessonId: d.refLessonId,
+          dueAt: d.dueAt ?? undefined
         })
       }
     }

@@ -161,7 +161,16 @@
     </a-card>
 
     <!-- 智能待办看板 -->
-    <a-card title="智能待办" class="section-card">
+    <a-card class="section-card">
+      <template #title>
+        <span>智能待办</span>
+        <a-tag v-if="stats.pendingPrepCount > 0" color="blue" style="margin-left: 8px">
+          待备课 {{ stats.pendingPrepCount }}
+        </a-tag>
+        <a-tag v-if="stats.pendingFeedbackCount > 0" color="orange" style="margin-left: 4px">
+          待反馈 {{ stats.pendingFeedbackCount }}
+        </a-tag>
+      </template>
       <template #extra>
         <a-space>
           <a-button size="small" :loading="regenerating" @click="onRegenerate">
@@ -195,6 +204,7 @@
               v-for="todo in col.list"
               :key="todo.id"
               class="todo-card"
+              :class="{ 'todo-overdue': isOverdue(todo) }"
               draggable="true"
               @dragstart="onDragStart($event, todo.id)"
             >
@@ -207,6 +217,7 @@
               <div class="todo-title">{{ todo.title }}</div>
               <div v-if="todo.dueAt" class="todo-due">
                 <ClockCircleOutlined /> {{ formatTime(todo.dueAt) }}
+                <span v-if="isOverdue(todo)" class="todo-overdue-label">已逾期</span>
               </div>
             </div>
             <a-empty v-if="col.list.length === 0" :image="emptyImage" description="暂无待办" />
@@ -324,7 +335,8 @@ const stats = ref<DashboardData['stats']>({
   totalStudents: 0,
   totalClasses: 0,
   weekLessonCount: 0,
-  pendingFeedbackCount: 0
+  pendingFeedbackCount: 0,
+  pendingPrepCount: 0
 })
 const todos = ref<Todo[]>([])
 const weekLessons = ref<Lesson[]>([])
@@ -385,6 +397,11 @@ function typeText(t: TodoType): string {
 }
 function typeColor(t: TodoType): string {
   return t === 'prep' ? 'blue' : t === 'feedback' ? 'orange' : 'green'
+}
+/** 待办是否逾期：未完成且截止时间早于当前 */
+function isOverdue(todo: Todo): boolean {
+  if (todo.status === 'done' || !todo.dueAt) return false
+  return new Date(todo.dueAt).getTime() < Date.now()
 }
 function formatTime(s: string): string {
   return dayjs(s).format('M月D日 HH:mm')
@@ -752,6 +769,22 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.todo-card.todo-overdue {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.todo-overdue .todo-due {
+  color: #dc2626;
+}
+.todo-overdue-label {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #fee2e2;
+  color: #dc2626;
+  font-size: 11px;
+  line-height: 16px;
 }
 .lesson-item {
   display: flex;
