@@ -134,6 +134,16 @@ export interface LessonPlanInput {
 
 // ============ 课程/课次 ============
 export type LessonStatus = 'pending' | 'teaching' | 'finished'
+
+/**
+ * 备课进度阶段（由课次关联版本与教案内容派生）：
+ * - no-version：未关联备课作品版本
+ * - no-plan：已关联版本但未编写教案
+ * - plan-incomplete：教案已存在但「教学目标」或「教学过程」关键章节为空
+ * - ready：备课完成
+ */
+export type PrepStage = 'no-version' | 'no-plan' | 'plan-incomplete' | 'ready'
+
 export interface Lesson {
   id: ID
   classId: ID
@@ -145,6 +155,8 @@ export interface Lesson {
   status: LessonStatus
   feedbackSent: boolean
   subject?: string | null
+  /** 备课进度阶段（list/get 时由 SQL JOIN 派生，可能为空表示未计算） */
+  prepStage?: PrepStage
 }
 export interface LessonInput {
   classId: ID
