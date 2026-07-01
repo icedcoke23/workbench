@@ -387,6 +387,43 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- ============ 课后反思 Modal（结束上课引导填写） ============ -->
+    <a-modal
+      v-model:open="reflectionModalVisible"
+      title="课后反思"
+      :width="680"
+      :mask-closable="false"
+      :destroy-on-close="true"
+    >
+      <template #footer>
+        <a-space>
+          <a-button @click="reflectionModalVisible = false">取消</a-button>
+          <a-button danger :loading="reflectionSubmitting" @click="finishWithoutReflection">
+            直接结束上课
+          </a-button>
+          <a-button type="primary" :loading="reflectionSubmitting" @click="submitReflectionAndFinish">
+            保存反思并结束
+          </a-button>
+        </a-space>
+      </template>
+      <a-alert
+        type="info"
+        show-icon
+        message="本节课关联了备课教案，建议结束后填写课后反思"
+        :description="reflectionContextDesc"
+        style="margin-bottom: 12px"
+      />
+      <div v-if="reflectionObjectives" class="reflection-objectives">
+        <span class="reflection-obj-label">本节课教学目标：</span>
+        <span class="reflection-obj-text">{{ reflectionObjectives }}</span>
+      </div>
+      <a-textarea
+        v-model:value="reflectionForm.text"
+        :rows="8"
+        placeholder="记录本节课的教学反思：目标达成情况、学生掌握程度、可改进之处、下次调整方向…"
+      />
+    </a-modal>
   </div>
 </template>
 
@@ -417,6 +454,7 @@ import type {
   Lesson,
   LessonInput,
   LessonPlan,
+  LessonPlanInput,
   Student,
   VersionMeta,
   DocLinkWithLesson
@@ -642,6 +680,14 @@ const prepDocsLoading = ref(false)
 const prepPlan = ref<LessonPlan | null>(null)
 const prepPlanLoading = ref(false)
 const prepPlanActiveKeys = ref<string[]>(['process'])
+
+// 课后反思 Modal（课次结束引导填写）
+const reflectionModalVisible = ref(false)
+const reflectionSubmitting = ref(false)
+const reflectionForm = reactive({
+  text: '',
+  ideaVersionId: '' as string
+})
 
 // 课次手动管理 Modal 状态
 const lessonModalVisible = ref(false)
@@ -915,6 +961,16 @@ const prepPlanHasContent = computed<boolean>(() => {
   return !!(p.objectives || p.keyPoints || p.preparation || p.process || p.reflection)
 })
 
+/** 课后反思 Modal 的上下文描述 */
+const reflectionContextDesc = computed(() => {
+  const plan = prepPlan.value
+  const verName = plan?.versionName || '当前版本'
+  return `关联版本：${verName}。反思将保存到该教案「课后反思」章节，作为后续教学改进参考。`
+})
+
+/** 课后反思时展示的本节课教学目标（对照目标反思达成情况） */
+const reflectionObjectives = computed(() => prepPlan.value?.objectives || '')
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -1004,28 +1060,74 @@ async function launchScratch(): Promise<void> {
   }
 }
 
-function confirmFinish(): void {
+async function confirmFinish(): Promise<void> {
+  if (!teachingLesson.value) return
+  const versionId = teachingLesson.value.ideaVersionId
+  // 若关联了备课版本，拉取最新教案判断「课后反思」是否已填写
+  let plan: LessonPlan | null = null
+  if (versionId) {
+    try {
+      plan = (await call(window.api.lessonPlan.getByVersion(versionId))) ?? null
+      // 同步刷新授课页教案状态，保证后续展示一致
+      prepPlan.value = plan
+    } catch {
+      plan = null
+    }
+  }
+  // 已关联版本、教案存在、但课后反思为空 -> 引导填写反思
+  if (versionId && plan && !plan.reflection) {
+    reflectionForm.text = ''
+    reflectionForm.ideaVersionId = versionId
+    reflectionModalVisible.value = true
+    return
+  }
+  // 否则走原确认流程
   Modal.confirm({
     title: '确认结束上课？',
     content: '结束后本节课将无法继续记录积分。',
     okText: '结束上课',
     okType: 'danger',
     cancelText: '取消',
-    onOk: async () => {
-      if (!teachingLesson.value) return
-      try {
-        await call(window.api.lesson.finish(teachingLesson.value.id))
-        message.success('已结束上课')
-        teachingLesson.value = null
-        students.value = []
-        totals.value = {}
-        pickResult.value = null
-        await loadLessons()
-      } catch (e) {
-        message.error(String(e))
-      }
-    }
+    onOk: () => doFinish(false)
   })
+}
+
+/** 真正执行结束课次：可选先保存课后反思 */
+async function doFinish(saveReflection: boolean): Promise<void> {
+  if (!teachingLesson.value) return
+  reflectionSubmitting.value = true
+  try {
+    if (saveReflection && reflectionForm.ideaVersionId) {
+      const input: LessonPlanInput = {
+        ideaVersionId: reflectionForm.ideaVersionId,
+        reflection: reflectionForm.text.trim() || null
+      }
+      await call(window.api.lessonPlan.upsert(input))
+    }
+    await call(window.api.lesson.finish(teachingLesson.value.id))
+    message.success('已结束上课')
+    reflectionModalVisible.value = false
+    teachingLesson.value = null
+    students.value = []
+    totals.value = {}
+    pickResult.value = null
+    prepPlan.value = null
+    await loadLessons()
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    reflectionSubmitting.value = false
+  }
+}
+
+/** 保存课后反思并结束上课 */
+async function submitReflectionAndFinish(): Promise<void> {
+  await doFinish(true)
+}
+
+/** 不填写反思，直接结束上课 */
+function finishWithoutReflection(): void {
+  void doFinish(false)
 }
 
 onMounted(async () => {
@@ -1318,6 +1420,23 @@ onUnmounted(() => {
 .banner-leave-to {
   opacity: 0;
   transform: translateY(-12px);
+}
+.reflection-objectives {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #f6f8fa;
+  border-left: 3px solid #4f46e5;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.reflection-obj-label {
+  color: #4f46e5;
+  font-weight: 500;
+}
+.reflection-obj-text {
+  color: #4b5563;
+  white-space: pre-wrap;
 }
 </style>
 
