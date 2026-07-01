@@ -93,6 +93,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       return full
     })
   )
+  ipcMain.handle('lessonPlan:exportMarkdown', (_e, id) =>
+    tryRunAsync(() => lessonPlanService.exportMarkdown(id))
+  )
 
   // ============ 待办 ============
   ipcMain.handle('todo:list', () => tryRun(() => todoRepo.list()))

@@ -150,6 +150,16 @@
                   <a-button size="small" @click="openPlanForVersion(item.ideaVersionId)">
                     <EditOutlined /> 编辑
                   </a-button>
+                  <a-tooltip title="复制为新教案（作为模板）">
+                    <a-button size="small" :loading="duplicatingId === item.id" @click="duplicatePlan(item)">
+                      <CopyOutlined />
+                    </a-button>
+                  </a-tooltip>
+                  <a-tooltip title="导出为 Markdown 文件">
+                    <a-button size="small" :loading="exportingId === item.id" @click="exportPlan(item)">
+                      <DownloadOutlined />
+                    </a-button>
+                  </a-tooltip>
                   <a-popconfirm title="确认删除该教案？作品版本不受影响。" @confirm="removePlan(item.id)">
                     <a-button size="small" danger><DeleteOutlined /></a-button>
                   </a-popconfirm>
@@ -739,7 +749,9 @@ import {
   EyeOutlined,
   FormOutlined,
   ScheduleOutlined,
-  ThunderboltOutlined
+  ThunderboltOutlined,
+  DownloadOutlined,
+  CopyOutlined
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
@@ -1130,6 +1142,51 @@ async function removePlan(id: string): Promise<void> {
     await loadPlans()
   } catch (e) {
     message.error(`删除失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
+// 教案导出 / 复制为模板
+const exportingId = ref<string | null>(null)
+const duplicatingId = ref<string | null>(null)
+
+/** 导出指定教案为 Markdown 文件（主进程弹出保存对话框） */
+async function exportPlan(plan: LessonPlan): Promise<void> {
+  exportingId.value = plan.id
+  try {
+    const savedPath = await call(window.api.lessonPlan.exportMarkdown(plan.id))
+    if (savedPath) {
+      message.success(`已导出到：${savedPath}`)
+    } else {
+      message.info('已取消导出')
+    }
+  } catch (e) {
+    message.error(`导出失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    exportingId.value = null
+  }
+}
+
+/**
+ * 复制现有教案作为模板：在编辑器中预填所有章节内容，但清空关联版本与反思，
+ * 让用户选择新版本后保存为一份独立教案，便于复用同一份备课结构。
+ */
+async function duplicatePlan(plan: LessonPlan): Promise<void> {
+  duplicatingId.value = plan.id
+  try {
+    planEditorIsEdit.value = false
+    resetPlanForm()
+    // 复制章节内容作为模板；反思属于课后内容，不复用
+    planForm.title = plan.title ? `${plan.title}（副本）` : ''
+    planForm.objectives = plan.objectives ?? ''
+    planForm.keyPoints = plan.keyPoints ?? ''
+    planForm.preparation = plan.preparation ?? ''
+    planForm.process = plan.process ?? ''
+    planForm.reflection = ''
+    planForm.durationMinutes = plan.durationMinutes ?? null
+    planEditorVisible.value = true
+    message.info('已复制教案内容为模板，请选择关联版本后保存')
+  } finally {
+    duplicatingId.value = null
   }
 }
 
