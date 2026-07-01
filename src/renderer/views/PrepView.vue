@@ -520,6 +520,47 @@
               </a-tag>
             </div>
           </div>
+
+          <!-- 教案摘要：预览版本时同步展示备课教案完成度，便于判断该版本是否可直接用于授课 -->
+          <div class="preview-plan">
+            <div class="preview-plan-head">
+              <FormOutlined />
+              <span class="preview-plan-title">
+                {{ versionPreviewPlan ? (versionPreviewPlan.title || '教案') : '教案' }}
+              </span>
+              <a-tag v-if="versionPreviewPlan?.durationMinutes" color="orange" size="small">
+                <ScheduleOutlined /> {{ versionPreviewPlan.durationMinutes }} 分钟
+              </a-tag>
+              <a-tag v-if="versionPreviewPlan" color="green" size="small">
+                已填 {{ versionPreviewPlanSections.length }}/5
+              </a-tag>
+              <a-tag v-else color="default" size="small">未编写</a-tag>
+            </div>
+            <div v-if="versionPreviewPlanSections.length > 0" class="preview-plan-sections">
+              <a-tag
+                v-for="sec in versionPreviewPlanSections"
+                :key="sec"
+                color="green"
+                size="small"
+              >{{ sec }}</a-tag>
+            </div>
+            <div v-if="versionPreviewPlan?.objectives" class="preview-plan-block">
+              <span class="preview-plan-label">教学目标：</span>
+              <span class="preview-plan-text">{{ truncateMd(versionPreviewPlan.objectives) }}</span>
+            </div>
+            <div v-if="versionPreviewPlan?.process" class="preview-plan-block">
+              <span class="preview-plan-label">教学过程：</span>
+              <span class="preview-plan-text">{{ truncateMd(versionPreviewPlan.process) }}</span>
+            </div>
+            <a-button
+              size="small"
+              type="link"
+              style="padding: 4px 0 0"
+              @click="editPlanFromPreview"
+            >
+              <EditOutlined /> {{ versionPreviewPlan ? '编辑教案' : '编写教案' }}
+            </a-button>
+          </div>
         </div>
       </a-spin>
     </a-modal>
@@ -967,7 +1008,22 @@ const versionPreviewVisible = ref(false)
 const versionPreviewLoading = ref(false)
 const versionPreviewTitle = ref('')
 const versionPreviewMeta = ref<VersionMeta | null>(null)
+const versionPreviewPlan = ref<LessonPlan | null>(null)
+const versionPreviewVersionId = ref<string | null>(null)
 const previewingId = ref<string | null>(null)
+
+/** 版本预览中已填写的教案章节标签 */
+const versionPreviewPlanSections = computed<string[]>(() => {
+  const p = versionPreviewPlan.value
+  if (!p) return []
+  const out: string[] = []
+  if (p.objectives) out.push('教学目标')
+  if (p.keyPoints) out.push('重难点')
+  if (p.preparation) out.push('教学准备')
+  if (p.process) out.push('教学过程')
+  if (p.reflection) out.push('课后反思')
+  return out
+})
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -978,12 +1034,19 @@ function formatFileSize(bytes: number): string {
 async function openVersionPreview(ver: IdeaVersion): Promise<void> {
   versionPreviewTitle.value = ver.versionName
   versionPreviewMeta.value = null
+  versionPreviewPlan.value = null
+  versionPreviewVersionId.value = ver.id
   versionPreviewVisible.value = true
   previewingId.value = ver.id
   versionPreviewLoading.value = true
   try {
-    const meta = await call(window.api.idea.getVersionMeta(ver.id))
+    // 并行拉取作品元信息与教案，减少预览等待
+    const [meta, plan] = await Promise.all([
+      call(window.api.idea.getVersionMeta(ver.id)),
+      call(window.api.lessonPlan.getByVersion(ver.id))
+    ])
     versionPreviewMeta.value = meta
+    versionPreviewPlan.value = plan ?? null
   } catch (e) {
     message.error(`预览失败：${String(e instanceof Error ? e.message : e)}`)
     versionPreviewVisible.value = false
@@ -991,6 +1054,13 @@ async function openVersionPreview(ver: IdeaVersion): Promise<void> {
     versionPreviewLoading.value = false
     previewingId.value = null
   }
+}
+
+/** 从版本预览跳转编写/编辑教案：关闭预览 Modal 并打开教案编辑器 */
+function editPlanFromPreview(): void {
+  const vid = versionPreviewVersionId.value
+  versionPreviewVisible.value = false
+  if (vid) openPlanForVersion(vid)
 }
 
 // 新建/编辑点子
@@ -1517,6 +1587,42 @@ onUnmounted(() => {
 .preview-sprites-label {
   color: #6b7280;
   margin-right: 8px;
+}
+.preview-plan {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed #e5e7eb;
+}
+.preview-plan-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+  color: #374151;
+}
+.preview-plan-title {
+  font-weight: 600;
+  color: #1f2937;
+}
+.preview-plan-sections {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.preview-plan-block {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #4b5563;
+}
+.preview-plan-label {
+  color: #6b7280;
+  margin-right: 4px;
+}
+.preview-plan-text {
+  color: #374151;
 }
 .resource-preview {
   min-height: 160px;
