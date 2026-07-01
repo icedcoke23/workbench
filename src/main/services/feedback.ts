@@ -3,6 +3,7 @@ import { buildWeeklyFeedbackUserMessage } from '../lib/prompts'
 import * as lessonRepo from '../database/repositories/lessons'
 import * as classRepo from '../database/repositories/classes'
 import * as feedbackRepo from '../database/repositories/feedbacks'
+import * as lessonPlanRepo from '../database/repositories/lesson-plans'
 import type { Feedback } from '@shared/types'
 
 /** 生成单节课周反馈（流式，通过 onChunk 回调推送增量） */
@@ -18,11 +19,23 @@ export async function generateWeekly(
   const cls = classRepo.get(lesson.classId)
   const records = lessonRepo.records(lessonId)
 
+  // 若课次关联了备课版本，拉取对应教案作为评价锚点
+  const lessonPlan = lesson.ideaVersionId
+    ? lessonPlanRepo.getByVersion(lesson.ideaVersionId)
+    : null
+
   const userMessage = buildWeeklyFeedbackUserMessage({
     className: cls?.name ?? '',
     lessonTime: lesson.startTime,
     subject: lesson.subject ?? 'Scratch',
     ideaTitle: lesson.ideaTitle ?? undefined,
+    lessonPlan: lessonPlan
+      ? {
+          objectives: lessonPlan.objectives,
+          keyPoints: lessonPlan.keyPoints,
+          process: lessonPlan.process
+        }
+      : null,
     records: records.map((r) => ({
       studentName: r.studentName ?? '',
       scoreChange: r.scoreChange,

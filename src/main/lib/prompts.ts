@@ -70,14 +70,29 @@ export function buildWeeklyFeedbackUserMessage(params: {
   lessonTime: string
   subject: string
   ideaTitle?: string
+  /** 备课教案数据，用于将反馈锚定到教学目标 */
+  lessonPlan?: {
+    objectives?: string | null
+    keyPoints?: string | null
+    process?: string | null
+  } | null
   records: Array<{ studentName: string; scoreChange: number; isPicked: boolean; note?: string }>
 }): string {
-  const { className, lessonTime, subject, ideaTitle, records } = params
+  const { className, lessonTime, subject, ideaTitle, lessonPlan, records } = params
   const picked = records.filter((r) => r.isPicked)
   const scoreList = records
     .filter((r) => r.scoreChange !== 0)
     .map((r) => `- ${r.studentName}：${r.scoreChange > 0 ? '+' : ''}${r.scoreChange}分${r.note ? `（${r.note}）` : ''}`)
     .join('\n')
+
+  // 教案锚点：当备课教案存在时，将教学目标与重难点作为评价参照注入提示
+  const planSection = lessonPlan?.objectives || lessonPlan?.keyPoints
+    ? `\n## 教学目标（本节课备课教案，用于评价参照）\n${
+        lessonPlan?.objectives ? `- 教学目标：${lessonPlan.objectives}\n` : ''
+      }${lessonPlan?.keyPoints ? `- 教学重难点：${lessonPlan.keyPoints}\n` : ''}${
+        lessonPlan?.process ? `- 教学过程概要：${lessonPlan.process.slice(0, 200)}${lessonPlan.process.length > 200 ? '…' : ''}\n` : ''
+      }请在「学员优点」和「能力提升」部分结合上述教学目标评价学员达成情况，在「需要提升」部分对照重难点给出改进方向。`
+    : ''
 
   return `请为本次课堂撰写一份教学反馈报告草稿，可发送给家长。
 
@@ -91,6 +106,6 @@ export function buildWeeklyFeedbackUserMessage(params: {
 - 参与点名学生：${picked.map((r) => r.studentName).join('、') || '无'}
 - 积分变动：
 ${scoreList || '无积分记录'}
-
+${planSection}
 请基于以上数据生成本次课堂的教学反馈，按报告结构输出。`
 }
