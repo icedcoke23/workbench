@@ -104,6 +104,34 @@ export interface IdeaVersionInput {
   filePath?: string
 }
 
+// ============ 教案 ============
+export interface LessonPlan {
+  id: ID
+  ideaVersionId: ID
+  versionName?: string
+  ideaTitle?: string | null
+  ideaId?: ID
+  title?: string | null
+  objectives?: string | null
+  keyPoints?: string | null
+  preparation?: string | null
+  process?: string | null
+  reflection?: string | null
+  durationMinutes?: number | null
+  createdAt: string
+  updatedAt: string
+}
+export interface LessonPlanInput {
+  ideaVersionId: ID
+  title?: string | null
+  objectives?: string | null
+  keyPoints?: string | null
+  preparation?: string | null
+  process?: string | null
+  reflection?: string | null
+  durationMinutes?: number | null
+}
+
 // ============ 课程/课次 ============
 export type LessonStatus = 'pending' | 'teaching' | 'finished'
 export interface Lesson {

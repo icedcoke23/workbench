@@ -88,6 +88,9 @@
                         <a-button type="primary" size="small" @click="launchVersion(ver.id)">
                           <PlayCircleOutlined /> 开始创作
                         </a-button>
+                        <a-button size="small" @click="openPlanForVersion(ver.id)">
+                          <FormOutlined /> 教案
+                        </a-button>
                         <a-popconfirm title="确认删除该版本？" @confirm="removeVersion(ver.id)">
                           <a-button size="small" danger><DeleteOutlined /></a-button>
                         </a-popconfirm>
@@ -95,6 +98,88 @@
                     </a-list-item>
                   </template>
                 </a-list>
+              </div>
+            </a-card>
+          </template>
+        </a-list>
+      </a-tab-pane>
+
+      <!-- ============ 教案 ============ -->
+      <a-tab-pane key="plans">
+        <template #tab>
+          <span><FormOutlined /> 教案</span>
+        </template>
+
+        <div class="tab-toolbar">
+          <span class="section-title">教案</span>
+          <a-space>
+            <a-button @click="loadPlans"><ReloadOutlined /> 刷新</a-button>
+            <a-button type="primary" @click="openNewPlanModal"><PlusOutlined /> 新建教案</a-button>
+          </a-space>
+        </div>
+
+        <a-alert
+          type="info"
+          show-icon
+          message="教案与作品版本 1:1 关联"
+          description="每个备课版本可编写一份结构化教案，包含教学目标、重难点、准备、过程、反思五个章节。教案随版本同步，跨设备可见。"
+          style="margin-bottom: 16px"
+        />
+
+        <a-list
+          :data-source="plans"
+          :loading="plansLoading"
+          :locale="{ emptyText: '暂无教案，可从「点子库 → 版本」点击「教案」按钮开始编写，或点击「新建教案」' }"
+        >
+          <template #renderItem="{ item }">
+            <a-card class="plan-card" size="small">
+              <template #title>
+                <div class="plan-title">
+                  <span class="plan-name">{{ item.title || `${item.versionName ?? '未命名版本'} 教案` }}</span>
+                  <a-space :size="6">
+                    <a-tag v-if="item.ideaTitle" color="purple">{{ item.ideaTitle }}</a-tag>
+                    <a-tag color="blue">{{ item.versionName || '未命名版本' }}</a-tag>
+                    <a-tag v-if="item.durationMinutes" color="orange">
+                      <ScheduleOutlined /> {{ item.durationMinutes }} 分钟
+                    </a-tag>
+                  </a-space>
+                </div>
+              </template>
+              <template #extra>
+                <a-space :size="6">
+                  <a-button size="small" @click="openPlanForVersion(item.ideaVersionId)">
+                    <EditOutlined /> 编辑
+                  </a-button>
+                  <a-popconfirm title="确认删除该教案？作品版本不受影响。" @confirm="removePlan(item.id)">
+                    <a-button size="small" danger><DeleteOutlined /></a-button>
+                  </a-popconfirm>
+                </a-space>
+              </template>
+
+              <div class="plan-sections">
+                <a-tag
+                  v-for="sec in planFilledSections(item)"
+                  :key="sec"
+                  color="green"
+                  size="small"
+                >{{ sec }}</a-tag>
+                <span v-if="planFilledSections(item).length === 0" class="plan-empty-sections">
+                  暂未填写任何章节内容
+                </span>
+              </div>
+
+              <div v-if="item.objectives" class="plan-preview-block">
+                <span class="plan-preview-label">教学目标：</span>
+                <span class="plan-preview-text">{{ truncateMd(item.objectives) }}</span>
+              </div>
+              <div v-if="item.process" class="plan-preview-block">
+                <span class="plan-preview-label">教学过程：</span>
+                <span class="plan-preview-text">{{ truncateMd(item.process) }}</span>
+              </div>
+
+              <div class="plan-meta">
+                <span>创建于 {{ formatDate(item.createdAt) }}</span>
+                <span>更新于 {{ formatDate(item.updatedAt) }}</span>
               </div>
             </a-card>
           </template>
@@ -461,6 +546,109 @@
         </div>
       </a-spin>
     </a-modal>
+
+    <!-- ============ 教案编辑器 Modal ============ -->
+    <a-modal
+      v-model:open="planEditorVisible"
+      :title="planEditorIsEdit ? '编辑教案' : '新建教案'"
+      :confirm-loading="planSubmitting"
+      width="820px"
+      :ok-text="planEditorIsEdit ? '保存' : '创建'"
+      @ok="submitPlan"
+    >
+      <a-form layout="vertical" class="plan-form">
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="所属点子">
+              <a-select
+                v-model:value="planForm.ideaId"
+                placeholder="选择点子"
+                :options="planIdeaOptions"
+                show-search
+                option-filter-prop="label"
+                @change="onPlanIdeaChange"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="关联版本" required>
+              <a-select
+                v-model:value="planForm.ideaVersionId"
+                placeholder="选择版本"
+                :options="planVersionOptions"
+                :disabled="!planForm.ideaId"
+                show-search
+                option-filter-prop="label"
+                @change="onPlanVersionChange"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="教案标题">
+          <a-input
+            v-model:value="planForm.title"
+            placeholder="可选，留空则使用「版本名 教案」"
+          />
+        </a-form-item>
+        <a-form-item label="预计时长（分钟）">
+          <a-input-number
+            v-model:value="planForm.durationMinutes"
+            :min="0"
+            :max="300"
+            placeholder="如 45"
+            style="width: 200px"
+          />
+        </a-form-item>
+        <a-collapse
+          :default-active-key="['objectives', 'process']"
+          class="plan-collapse"
+        >
+          <a-collapse-panel key="objectives" header="教学目标">
+            <a-textarea
+              v-model:value="planForm.objectives"
+              :rows="4"
+              placeholder="本节课要达成的教学目标，支持 Markdown"
+            />
+          </a-collapse-panel>
+          <a-collapse-panel key="keyPoints" header="教学重难点">
+            <a-textarea
+              v-model:value="planForm.keyPoints"
+              :rows="4"
+              placeholder="教学重点与难点"
+            />
+          </a-collapse-panel>
+          <a-collapse-panel key="preparation" header="教学准备">
+            <a-textarea
+              v-model:value="planForm.preparation"
+              :rows="3"
+              placeholder="课前准备事项：素材、环境、教具等"
+            />
+          </a-collapse-panel>
+          <a-collapse-panel key="process" header="教学过程">
+            <a-textarea
+              v-model:value="planForm.process"
+              :rows="6"
+              placeholder="课堂推进步骤，可分阶段描述"
+            />
+          </a-collapse-panel>
+          <a-collapse-panel key="reflection" header="课后反思">
+            <a-textarea
+              v-model:value="planForm.reflection"
+              :rows="4"
+              placeholder="课后填写：哪些环节效果好、哪些需改进"
+            />
+          </a-collapse-panel>
+        </a-collapse>
+        <a-alert
+          v-if="planEditorVersionHasPlan && !planEditorIsEdit"
+          type="warning"
+          show-icon
+          message="该版本已有教案"
+          description="保存将覆盖现有教案内容。"
+          style="margin-top: 12px"
+        />
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -479,7 +667,9 @@ import {
   LinkOutlined,
   GlobalOutlined,
   EditOutlined,
-  EyeOutlined
+  EyeOutlined,
+  FormOutlined,
+  ScheduleOutlined
 } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
@@ -492,13 +682,15 @@ import type {
   Resource,
   ResourceType,
   Lesson,
+  LessonPlan,
+  LessonPlanInput,
   ScratchSavePayload,
   VersionMeta,
   DocLinkWithLesson
 } from '@shared/types'
 
 // ============ 公共 ============
-const activeTab = ref<'ideas' | 'resources' | 'docs'>('ideas')
+const activeTab = ref<'ideas' | 'plans' | 'resources' | 'docs'>('ideas')
 
 function formatDate(d: string): string {
   return d ? dayjs(d).format('YYYY-MM-DD HH:mm') : '-'
@@ -569,6 +761,202 @@ async function removeVersion(versionId: string): Promise<void> {
     await call(window.api.idea.removeVersion(versionId))
     message.success('已删除版本')
     await loadIdeas()
+  } catch (e) {
+    message.error(`删除失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
+// ============ 教案 ============
+const plans = ref<LessonPlan[]>([])
+const plansLoading = ref(false)
+const planEditorVisible = ref(false)
+const planEditorIsEdit = ref(false)
+const planEditorVersionHasPlan = ref(false)
+const planSubmitting = ref(false)
+const planForm = reactive<{
+  ideaVersionId: string | undefined
+  ideaId: string | undefined
+  title: string
+  objectives: string
+  keyPoints: string
+  preparation: string
+  process: string
+  reflection: string
+  durationMinutes: number | null
+}>({
+  ideaVersionId: undefined,
+  ideaId: undefined,
+  title: '',
+  objectives: '',
+  keyPoints: '',
+  preparation: '',
+  process: '',
+  reflection: '',
+  durationMinutes: null
+})
+
+/** 教案编辑器中可选的点子列表 */
+const planIdeaOptions = computed(() =>
+  ideas.value.map((i) => ({ value: i.id, label: i.title }))
+)
+
+/** 教案编辑器中当前点子下的版本列表 */
+const planVersionOptions = computed(() => {
+  if (!planForm.ideaId) return []
+  const idea = ideas.value.find((i) => i.id === planForm.ideaId)
+  return (idea?.versions ?? []).map((v) => ({
+    value: v.id,
+    label: v.versionName
+  }))
+})
+
+async function loadPlans(): Promise<void> {
+  plansLoading.value = true
+  try {
+    plans.value = await call(window.api.lessonPlan.list())
+  } catch (e) {
+    message.error(`加载教案失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    plansLoading.value = false
+  }
+}
+
+/** 计算教案已填写的章节标签 */
+function planFilledSections(p: LessonPlan): string[] {
+  const out: string[] = []
+  if (p.objectives) out.push('教学目标')
+  if (p.keyPoints) out.push('重难点')
+  if (p.preparation) out.push('教学准备')
+  if (p.process) out.push('教学过程')
+  if (p.reflection) out.push('课后反思')
+  return out
+}
+
+/** 截断 Markdown 文本用于预览（去标记符号 + 限长） */
+function truncateMd(md: string): string {
+  const plain = md
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/\[(.+?)\]\(.+?\)/g, '$1')
+    .replace(/\n+/g, ' ')
+    .trim()
+  return plain.length > 80 ? plain.slice(0, 80) + '…' : plain
+}
+
+function resetPlanForm(): void {
+  planForm.ideaVersionId = undefined
+  planForm.ideaId = undefined
+  planForm.title = ''
+  planForm.objectives = ''
+  planForm.keyPoints = ''
+  planForm.preparation = ''
+  planForm.process = ''
+  planForm.reflection = ''
+  planForm.durationMinutes = null
+  planEditorVersionHasPlan.value = false
+}
+
+function openNewPlanModal(): void {
+  planEditorIsEdit.value = false
+  resetPlanForm()
+  planEditorVisible.value = true
+}
+
+/** 从版本入口打开教案编辑器：自动加载已有教案内容，无则新建 */
+async function openPlanForVersion(versionId: string): Promise<void> {
+  planEditorIsEdit.value = false
+  resetPlanForm()
+  planForm.ideaVersionId = versionId
+  planEditorVisible.value = true
+  try {
+    const existing = await call(window.api.lessonPlan.getByVersion(versionId))
+    if (existing) {
+      planEditorIsEdit.value = true
+      planEditorVersionHasPlan.value = true
+      planForm.ideaId = existing.ideaId
+      planForm.title = existing.title ?? ''
+      planForm.objectives = existing.objectives ?? ''
+      planForm.keyPoints = existing.keyPoints ?? ''
+      planForm.preparation = existing.preparation ?? ''
+      planForm.process = existing.process ?? ''
+      planForm.reflection = existing.reflection ?? ''
+      planForm.durationMinutes = existing.durationMinutes ?? null
+    }
+  } catch (e) {
+    message.error(`加载教案失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
+function onPlanIdeaChange(): void {
+  planForm.ideaVersionId = undefined
+  planEditorVersionHasPlan.value = false
+}
+
+async function onPlanVersionChange(versionId: string): Promise<void> {
+  if (!versionId) return
+  planEditorVersionHasPlan.value = false
+  try {
+    const existing = await call(window.api.lessonPlan.getByVersion(versionId))
+    if (existing) {
+      planEditorVersionHasPlan.value = true
+      // 切换到已有教案版本时预填充内容，避免覆盖时丢失
+      planEditorIsEdit.value = true
+      planForm.title = existing.title ?? ''
+      planForm.objectives = existing.objectives ?? ''
+      planForm.keyPoints = existing.keyPoints ?? ''
+      planForm.preparation = existing.preparation ?? ''
+      planForm.process = existing.process ?? ''
+      planForm.reflection = existing.reflection ?? ''
+      planForm.durationMinutes = existing.durationMinutes ?? null
+    } else {
+      planEditorIsEdit.value = false
+      planForm.title = ''
+      planForm.objectives = ''
+      planForm.keyPoints = ''
+      planForm.preparation = ''
+      planForm.process = ''
+      planForm.reflection = ''
+      planForm.durationMinutes = null
+    }
+  } catch {
+    // 忽略，用户可继续手动填写
+  }
+}
+
+async function submitPlan(): Promise<void> {
+  if (!planForm.ideaVersionId) {
+    message.warning('请选择关联版本')
+    return
+  }
+  planSubmitting.value = true
+  try {
+    const input: LessonPlanInput = {
+      ideaVersionId: planForm.ideaVersionId,
+      title: planForm.title.trim() || null,
+      objectives: planForm.objectives.trim() || null,
+      keyPoints: planForm.keyPoints.trim() || null,
+      preparation: planForm.preparation.trim() || null,
+      process: planForm.process.trim() || null,
+      reflection: planForm.reflection.trim() || null,
+      durationMinutes: planForm.durationMinutes
+    }
+    await call(window.api.lessonPlan.upsert(input))
+    message.success(planEditorIsEdit.value ? '教案已保存' : '教案已创建')
+    planEditorVisible.value = false
+    await loadPlans()
+  } catch (e) {
+    message.error(`保存失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    planSubmitting.value = false
+  }
+}
+
+async function removePlan(id: string): Promise<void> {
+  try {
+    await call(window.api.lessonPlan.remove(id))
+    message.success('已删除教案')
+    await loadPlans()
   } catch (e) {
     message.error(`删除失败：${String(e instanceof Error ? e.message : e)}`)
   }
@@ -1030,19 +1418,21 @@ onMounted(() => {
   loadAllTags()
   loadLessons()
   loadDocLinks()
+  loadPlans()
 
   const subscribe = window.events['scratch:save-request'] as unknown as SubscribeSave
   offScratchSave = subscribe((payload) => {
     handleScratchSave(payload)
   })
 
-  // 订阅全局刷新事件：刷新时重新加载点子库、资源库、标签、课次、文档
+  // 订阅全局刷新事件：刷新时重新加载点子库、资源库、标签、课次、文档、教案
   offRefresh = subscribeRefresh(() => {
     loadIdeas()
     loadResources()
     loadAllTags()
     loadLessons()
     loadDocLinks()
+    loadPlans()
   })
   // 订阅全局新增事件：触发新建点子弹窗
   offNewItem = subscribeNewItem(openNewIdeaModal, 'prep')
@@ -1197,5 +1587,54 @@ onUnmounted(() => {
   font-size: 12px;
   color: #9ca3af;
   margin-top: 4px;
+}
+.plan-card {
+  margin-bottom: 12px;
+}
+.plan-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.plan-name {
+  font-weight: 600;
+}
+.plan-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.plan-empty-sections {
+  font-size: 12px;
+  color: #9ca3af;
+}
+.plan-preview-block {
+  font-size: 12px;
+  color: #4b5563;
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+.plan-preview-label {
+  color: #6b7280;
+}
+.plan-preview-text {
+  color: #374151;
+}
+.plan-meta {
+  font-size: 12px;
+  color: #9ca3af;
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+.plan-form {
+  max-width: 760px;
+}
+.plan-collapse {
+  margin-top: 8px;
+}
+.plan-collapse :deep(.ant-collapse-header) {
+  font-weight: 500;
 }
 </style>

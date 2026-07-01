@@ -3,6 +3,7 @@ import { copyFile, mkdir } from 'fs/promises'
 import { existsSync, readFileSync } from 'fs'
 import { join, extname, basename } from 'path'
 import { uuid } from '../database/db'
+import { resourcesRoot, toStoredPath } from './paths'
 
 /** 选择图片文件 */
 export async function pickImage(): Promise<string | null> {
@@ -66,13 +67,14 @@ export async function importResourceFile(
   if (!existsSync(filePath)) {
     throw new Error(`源文件不存在：${filePath}`)
   }
-  const dir = join(app.getPath('userData'), 'resources', type)
+  const root = resourcesRoot()
+  const dir = join(root, type)
   await mkdir(dir, { recursive: true })
   const name = basename(filePath, extname(filePath))
   const ext = extname(filePath)
   const dest = join(dir, `${name}-${uuid().slice(0, 8)}${ext}`)
   await copyFile(filePath, dest)
-  return { name, filePath: dest }
+  return { name, filePath: toStoredPath(dest, root) }
 }
 
 /** 选择 Scratch 资源文件（.sb3 / .json），返回路径或 null（用户取消） */

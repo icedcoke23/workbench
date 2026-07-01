@@ -4,13 +4,14 @@ import { join } from 'path'
 import { db } from '../database/db'
 import { getLogger } from './logger'
 
-// 按依赖顺序列出所有需要导出/导入的表（被依赖方在前）
+// 按依赖顺序列出所有需要导出/导入的表（被依赖方在前；lesson_plans 须在 idea_versions 之后）
 const EXPORT_TABLES = [
   'students',
   'classes',
   'enrollments',
   'ideas',
   'idea_versions',
+  'lesson_plans',
   'lessons',
   'lesson_records',
   'todos',

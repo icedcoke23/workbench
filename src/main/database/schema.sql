@@ -62,6 +62,22 @@ CREATE TABLE IF NOT EXISTS idea_versions (
 );
 CREATE INDEX IF NOT EXISTS idx_idea_versions_idea ON idea_versions(idea_id);
 
+-- 教案（与点子版本 1:1 关联，结构化备课内容）
+CREATE TABLE IF NOT EXISTS lesson_plans (
+  id TEXT PRIMARY KEY,
+  idea_version_id TEXT NOT NULL UNIQUE,
+  title TEXT,
+  objectives TEXT,
+  key_points TEXT,
+  preparation TEXT,
+  process TEXT,
+  reflection TEXT,
+  duration_minutes INTEGER,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (idea_version_id) REFERENCES idea_versions(id) ON DELETE CASCADE
+);
+
 -- 课次
 CREATE TABLE IF NOT EXISTS lessons (
   id TEXT PRIMARY KEY,
@@ -177,6 +193,9 @@ CREATE TRIGGER IF NOT EXISTS trg_ideas_updated
 CREATE TRIGGER IF NOT EXISTS trg_feedbacks_updated
   AFTER UPDATE ON feedbacks FOR EACH ROW
   BEGIN UPDATE feedbacks SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id; END;
+CREATE TRIGGER IF NOT EXISTS trg_lesson_plans_updated
+  AFTER UPDATE ON lesson_plans FOR EACH ROW
+  BEGIN UPDATE lesson_plans SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id; END;
 
 -- 反馈模板（内置 + 自定义）
 CREATE TABLE IF NOT EXISTS feedback_templates (

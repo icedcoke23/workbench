@@ -4,6 +4,7 @@ import { mkdir, writeFile, readFile } from 'fs/promises'
 import { existsSync, readFileSync } from 'fs'
 import JSZip from 'jszip'
 import { getScratch } from '../database/repositories/settings'
+import { toStoredPath } from './paths'
 import * as ideaRepo from '../database/repositories/ideas'
 import * as resourceRepo from '../database/repositories/resources'
 import type { ArchiveTarget, IdeaVersion, Resource, ScratchSavePayload, VersionMeta } from '@shared/types'
@@ -210,13 +211,14 @@ export async function saveToResource(
   payload: ScratchSavePayload,
   type: Resource['type'] = 'sprite'
 ): Promise<Resource> {
-  const dir = join(workspaceDir(), '_resources')
+  const root = resourcesRoot()
+  const dir = join(root, type)
   await mkdir(dir, { recursive: true })
   const name = safeFileName(payload.fileName || `scratch-${Date.now()}`)
   const filePath = join(dir, `${name}.sb3`)
   const sb3 = await packSb3(payload.projectJson)
   await writeFile(filePath, sb3)
-  return resourceRepo.create({ name, type, filePath })
+  return resourceRepo.create({ name, type, filePath: toStoredPath(filePath, root) })
 }
 
 /** 将项目 JSON 打包为 .sb3（zip，含 project.json） */

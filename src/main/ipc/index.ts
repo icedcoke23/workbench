@@ -5,6 +5,7 @@ import * as studentRepo from '../database/repositories/students'
 import * as classRepo from '../database/repositories/classes'
 import * as lessonRepo from '../database/repositories/lessons'
 import * as ideaRepo from '../database/repositories/ideas'
+import * as lessonPlanRepo from '../database/repositories/lesson-plans'
 import * as todoRepo from '../database/repositories/todos'
 import * as resourceRepo from '../database/repositories/resources'
 import * as feedbackRepo from '../database/repositories/feedbacks'
@@ -74,6 +75,13 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('idea:updateVersion', (_e, id, input) => tryRun(() => ideaRepo.updateVersion(id, input)))
   ipcMain.handle('idea:removeVersion', (_e, id) => tryRun(() => ideaRepo.removeVersion(id)))
   ipcMain.handle('idea:getVersionMeta', (_e, id) => tryRunAsync(() => scratchService.getVersionMeta(id)))
+
+  // ============ 教案 ============
+  ipcMain.handle('lessonPlan:list', (_e, q) => tryRun(() => lessonPlanRepo.list(q)))
+  ipcMain.handle('lessonPlan:get', (_e, id) => tryRun(() => lessonPlanRepo.get(id)))
+  ipcMain.handle('lessonPlan:getByVersion', (_e, versionId) => tryRun(() => lessonPlanRepo.getByVersion(versionId)))
+  ipcMain.handle('lessonPlan:upsert', (_e, input) => tryRun(() => lessonPlanRepo.upsert(input)))
+  ipcMain.handle('lessonPlan:remove', (_e, id) => tryRun(() => lessonPlanRepo.remove(id)))
 
   // ============ 待办 ============
   ipcMain.handle('todo:list', () => tryRun(() => todoRepo.list()))

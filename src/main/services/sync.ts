@@ -162,6 +162,8 @@ interface SnapshotPayload {
   lessons?: unknown[]
   /** 备课：点子版本（含 .sb3 文件路径，跨设备仅同步元数据） */
   ideaVersions?: unknown[]
+  /** 备课：教案（与点子版本 1:1 关联，结构化备课内容） */
+  lessonPlans?: unknown[]
   /** 备课：资源库（含素材文件路径，跨设备仅同步元数据） */
   resources?: unknown[]
   /** 备课：文档关联 */
@@ -185,6 +187,7 @@ function buildSnapshot(): SnapshotPayload & { exportedAt: string } {
     ideas,
     lessons,
     ideaVersions: listRaw('idea_versions'),
+    lessonPlans: listRaw('lesson_plans'),
     resources: listRaw('resources'),
     docLinks: listRaw('doc_links'),
     exportedAt: new Date().toISOString()
@@ -234,6 +237,25 @@ function applySnapshot(snap: SnapshotPayload): void {
       'notes',
       'created_at'
     ])
+    upsertRows(
+      conn,
+      'lesson_plans',
+      snap.lessonPlans,
+      [
+        'id',
+        'idea_version_id',
+        'title',
+        'objectives',
+        'key_points',
+        'preparation',
+        'process',
+        'reflection',
+        'duration_minutes',
+        'created_at',
+        'updated_at'
+      ],
+      ['idea_version_id']
+    )
     upsertRows(conn, 'resources', snap.resources, [
       'id',
       'name',
@@ -253,21 +275,36 @@ function applySnapshot(snap: SnapshotPayload): void {
   })()
 }
 
-/** 通用 upsert：按行对象的列值插入或替换 */
+/** 通用 upsert：按行对象的列值插入或替换；可选 conflictCols 时使用 ON CONFLICT 更新 */
 function upsertRows(
   conn: ReturnType<typeof db>,
   table: string,
   rows: unknown[] | undefined,
-  fallbackCols: string[]
+  fallbackCols: string[],
+  conflictCols?: string[]
 ): void {
   if (!rows || rows.length === 0) return
+  const effectiveConflict = conflictCols?.filter((c) => fallbackCols.includes(c)) ?? []
+  const useUpsert = effectiveConflict.length > 0
   for (const row of rows) {
     const r = row as Record<string, unknown>
     const cols = Object.keys(r).filter((c) => fallbackCols.includes(c))
     if (cols.length === 0) continue
     const placeholders = cols.map(() => '?').join(', ')
+    if (!useUpsert) {
+      conn.prepare(
+        `INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`
+      ).run(...cols.map((c) => r[c]))
+      continue
+    }
+    const conflictSpec = effectiveConflict.join(', ')
+    const setClauses = cols
+      .filter((c) => !effectiveConflict.includes(c))
+      .map((c) => `${c} = excluded.${c}`)
+    if (setClauses.length === 0) continue
     conn.prepare(
-      `INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`
+      `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})
+       ON CONFLICT(${conflictSpec}) DO UPDATE SET ${setClauses.join(', ')}`
     ).run(...cols.map((c) => r[c]))
   }
 }

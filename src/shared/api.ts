@@ -15,6 +15,8 @@ import type {
   IdeaVersionInput,
   Lesson,
   LessonInput,
+  LessonPlan,
+  LessonPlanInput,
   LessonRecord,
   MenuAction,
   PageQuery,
@@ -42,6 +44,7 @@ export const API_METHODS: Record<string, string[]> = {
   class: ['list', 'get', 'create', 'update', 'remove', 'members', 'addMembers', 'removeMember'],
   lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'records', 'score', 'pick'],
   idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'updateVersion', 'removeVersion', 'getVersionMeta'],
+  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove'],
   todo: ['list', 'create', 'update', 'remove', 'regenerate'],
   resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags', 'readFile'],
   feedback: ['list', 'get', 'save', 'remove', 'generate', 'generateReport', 'exportPdf', 'sendWeChat'],
@@ -101,6 +104,14 @@ export interface WorkbenchAPI {
     updateVersion: (versionId: ID, input: Partial<Pick<IdeaVersionInput, 'versionName' | 'notes'>>) => Promise<Result<IdeaVersion>>
     removeVersion: (versionId: ID) => Promise<Result<void>>
     getVersionMeta: (versionId: ID) => Promise<Result<VersionMeta>>
+  }
+  // 教案
+  lessonPlan: {
+    list: (q?: { ideaId?: ID }) => Promise<Result<LessonPlan[]>>
+    get: (id: ID) => Promise<Result<LessonPlan>>
+    getByVersion: (versionId: ID) => Promise<Result<LessonPlan | null>>
+    upsert: (input: LessonPlanInput) => Promise<Result<LessonPlan>>
+    remove: (id: ID) => Promise<Result<void>>
   }
   // 待办
   todo: {

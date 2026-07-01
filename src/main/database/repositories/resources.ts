@@ -1,5 +1,6 @@
 import { db, parseJSON, stringifyJSON, uuid } from '../db'
 import { existsSync, unlinkSync } from 'fs'
+import { resolveStoredPath, resourcesRoot } from '../../services/paths'
 import type { Resource, ResourceInput } from '@shared/types'
 
 interface ResourceRow {
@@ -17,7 +18,7 @@ function mapRow(r: ResourceRow): Resource {
     id: r.id,
     name: r.name,
     type: r.type as Resource['type'],
-    filePath: r.file_path,
+    filePath: resolveStoredPath(r.file_path, resourcesRoot()),
     tags: parseJSON<string[]>(r.tags, []),
     classId: r.class_id,
     createdAt: r.created_at
@@ -65,18 +66,18 @@ export function create(input: ResourceInput): Resource {
 
 /** 更新资源：未传入的字段沿用原值，返回更新后的资源 */
 export function update(id: string, input: Partial<ResourceInput>): Resource {
-  const cur = list().find((r) => r.id === id)
-  if (!cur) throw new Error('资源不存在')
+  const raw = db().prepare(`SELECT * FROM resources WHERE id = ?`).get(id) as ResourceRow | undefined
+  if (!raw) throw new Error('资源不存在')
   db()
     .prepare(
       `UPDATE resources SET name = ?, type = ?, file_path = ?, tags = ?, class_id = ? WHERE id = ?`
     )
     .run(
-      input.name ?? cur.name,
-      input.type ?? cur.type,
-      input.filePath ?? cur.filePath,
-      stringifyJSON(input.tags ?? cur.tags),
-      input.classId ?? cur.classId ?? null,
+      input.name ?? raw.name,
+      input.type ?? (raw.type as Resource['type']),
+      input.filePath ?? raw.file_path,
+      stringifyJSON(input.tags ?? parseJSON<string[]>(raw.tags, [])),
+      input.classId ?? raw.class_id ?? null,
       id
     )
   return list().find((r) => r.id === id)!
@@ -98,7 +99,7 @@ export function remove(id: string): void {
   const row = db().prepare(`SELECT file_path FROM resources WHERE id = ?`).get(id) as
     | { file_path: string }
     | undefined
-  const p = row?.file_path
+  const p = row?.file_path ? resolveStoredPath(row.file_path, resourcesRoot()) : ''
   if (p) {
     try {
       if (existsSync(p)) unlinkSync(p)
