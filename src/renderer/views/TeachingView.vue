@@ -120,6 +120,113 @@
         </div>
       </a-card>
 
+      <!-- 备课上下文：关联版本的 Scratch 作品元信息 + 教案 + 关联文档 -->
+      <a-card
+        v-if="teachingLesson.ideaVersionId || prepDocs.length > 0"
+        :bordered="false"
+        class="prep-context-card"
+        size="small"
+      >
+        <a-row :gutter="16">
+          <!-- 版本作品元信息 -->
+          <a-col v-if="teachingLesson.ideaVersionId" :xs="24" :lg="14">
+            <div class="prep-section-title">
+              <BulbOutlined /> 备课作品
+            </div>
+            <a-spin :spinning="prepVersionMetaLoading" size="small">
+              <div v-if="prepVersionMeta" class="prep-meta">
+                <template v-if="prepVersionMeta.hasFile">
+                  <div class="prep-meta-stats">
+                    <span><AppstoreOutlined /> 角色 {{ prepVersionMeta.spriteCount }}</span>
+                    <span><CodeOutlined /> 脚本 {{ prepVersionMeta.scriptCount }}</span>
+                    <span>造型 {{ prepVersionMeta.costumeCount }}</span>
+                    <span>音效 {{ prepVersionMeta.soundCount }}</span>
+                    <span class="prep-meta-size">{{ formatFileSize(prepVersionMeta.fileSize) }}</span>
+                  </div>
+                  <div v-if="prepVersionMeta.spriteNames.length" class="prep-meta-names">
+                    角色：
+                    <a-tag v-for="n in prepVersionMeta.spriteNames" :key="n" size="small">{{ n }}</a-tag>
+                  </div>
+                </template>
+                <span v-else class="prep-meta-empty">该版本暂无作品文件，可点击「打开 Scratch」创作</span>
+              </div>
+              <span v-else class="prep-meta-empty">加载中…</span>
+            </a-spin>
+          </a-col>
+          <!-- 关联文档 -->
+          <a-col :xs="24" :lg="teachingLesson.ideaVersionId ? 10 : 24">
+            <div class="prep-section-title">
+              <FileTextOutlined /> 关联文档
+            </div>
+            <a-spin :spinning="prepDocsLoading" size="small">
+              <a-empty
+                v-if="!prepDocsLoading && prepDocs.length === 0"
+                description="暂无关联文档"
+                :image="undefined"
+              />
+              <div v-else class="prep-doc-list">
+                <div v-for="d in prepDocs" :key="d.id" class="prep-doc-item">
+                  <a class="prep-doc-title" @click="openDocLink(d.url)">
+                    {{ d.title || d.url }}
+                  </a>
+                  <a-button size="small" type="link" @click="openDocLink(d.url)">
+                    <GlobalOutlined /> 打开
+                  </a-button>
+                </div>
+              </div>
+            </a-spin>
+          </a-col>
+        </a-row>
+
+        <!-- 教案：授课时按章节展开查看，便于教师按教案推进课堂 -->
+        <a-divider v-if="teachingLesson.ideaVersionId" class="prep-plan-divider">
+          <FormOutlined /> 教案
+        </a-divider>
+        <div v-if="teachingLesson.ideaVersionId" class="prep-plan-section">
+          <a-spin :spinning="prepPlanLoading" size="small">
+            <div v-if="prepPlan">
+              <div class="prep-plan-header">
+                <span class="prep-plan-title">{{ prepPlan.title || (prepPlan.versionName ? `${prepPlan.versionName} 教案` : '教案') }}</span>
+                <a-tag v-if="prepPlan.durationMinutes" color="orange" size="small">
+                  {{ prepPlan.durationMinutes }} 分钟
+                </a-tag>
+                <a-tag
+                  v-for="sec in prepPlanFilledSections"
+                  :key="sec"
+                  color="green"
+                  size="small"
+                >{{ sec }}</a-tag>
+              </div>
+              <a-collapse
+                v-if="prepPlanHasContent"
+                v-model:active-key="prepPlanActiveKeys"
+                ghost
+                size="small"
+                class="prep-plan-collapse"
+              >
+                <a-collapse-panel v-if="prepPlan.objectives" key="objectives" header="教学目标">
+                  <div class="prep-plan-text">{{ prepPlan.objectives }}</div>
+                </a-collapse-panel>
+                <a-collapse-panel v-if="prepPlan.keyPoints" key="keyPoints" header="教学重难点">
+                  <div class="prep-plan-text">{{ prepPlan.keyPoints }}</div>
+                </a-collapse-panel>
+                <a-collapse-panel v-if="prepPlan.preparation" key="preparation" header="教学准备">
+                  <div class="prep-plan-text">{{ prepPlan.preparation }}</div>
+                </a-collapse-panel>
+                <a-collapse-panel v-if="prepPlan.process" key="process" header="教学过程">
+                  <div class="prep-plan-text">{{ prepPlan.process }}</div>
+                </a-collapse-panel>
+                <a-collapse-panel v-if="prepPlan.reflection" key="reflection" header="课后反思">
+                  <div class="prep-plan-text">{{ prepPlan.reflection }}</div>
+                </a-collapse-panel>
+              </a-collapse>
+              <span v-else class="prep-meta-empty">该教案所有章节均未填写内容</span>
+            </div>
+            <span v-else class="prep-meta-empty">该版本尚未编写教案，可在「备课 → 教案」中创建</span>
+          </a-spin>
+        </div>
+      </a-card>
+
       <!-- 随机点名结果横幅 -->
       <transition name="banner">
         <div v-if="pickResult" class="pick-banner">
@@ -296,11 +403,24 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  BulbOutlined
+  BulbOutlined,
+  FormOutlined,
+  FileTextOutlined,
+  GlobalOutlined,
+  AppstoreOutlined
 } from '@ant-design/icons-vue'
 import { call } from '@renderer/api'
 import { subscribeRefresh } from '@renderer/composables/useShortcuts'
-import type { ClassInfo, Idea, Lesson, LessonInput, Student } from '@shared/types'
+import type {
+  ClassInfo,
+  Idea,
+  Lesson,
+  LessonInput,
+  LessonPlan,
+  Student,
+  VersionMeta,
+  DocLinkWithLesson
+} from '@shared/types'
 import dayjs from 'dayjs'
 
 // ============ 可视化计时器子组件（同文件内定义） ============
@@ -514,6 +634,15 @@ const pickedId = ref<string | null>(null)
 const pickResult = ref<Student | null>(null)
 const currentNote = ref('')
 
+// 备课上下文（授课模式展示关联版本的教案、作品元信息、文档）
+const prepVersionMeta = ref<VersionMeta | null>(null)
+const prepVersionMetaLoading = ref(false)
+const prepDocs = ref<DocLinkWithLesson[]>([])
+const prepDocsLoading = ref(false)
+const prepPlan = ref<LessonPlan | null>(null)
+const prepPlanLoading = ref(false)
+const prepPlanActiveKeys = ref<string[]>(['process'])
+
 // 课次手动管理 Modal 状态
 const lessonModalVisible = ref(false)
 const lessonSubmitting = ref(false)
@@ -721,6 +850,85 @@ async function loadRecords(): Promise<void> {
   }
 }
 
+/** 加载备课上下文：关联版本的作品元信息、教案、关联文档，三者并行拉取 */
+async function loadPrepContext(): Promise<void> {
+  const versionId = teachingLesson.value?.ideaVersionId
+  const lessonId = teachingLesson.value?.id
+  // 重置状态
+  prepVersionMeta.value = null
+  prepPlan.value = null
+  prepDocs.value = []
+  if (!versionId && !lessonId) return
+
+  // 并行加载，互不阻塞
+  if (versionId) {
+    prepVersionMetaLoading.value = true
+    call(window.api.idea.getVersionMeta(versionId))
+      .then((meta) => { prepVersionMeta.value = meta })
+      .catch(() => { prepVersionMeta.value = null })
+      .finally(() => { prepVersionMetaLoading.value = false })
+
+    prepPlanLoading.value = true
+    call(window.api.lessonPlan.getByVersion(versionId))
+      .then((p) => { prepPlan.value = p ?? null })
+      .catch(() => { prepPlan.value = null })
+      .finally(() => { prepPlanLoading.value = false })
+  }
+
+  if (lessonId) {
+    prepDocsLoading.value = true
+    call(window.api.doc.listLinks(lessonId))
+      .then((links) => {
+        // listLinks 返回简化的 { id, url, title }，需适配 DocLinkWithLesson 展示
+        prepDocs.value = (links as Array<{ id: string; url: string; title: string }>).map((l) => ({
+          id: l.id,
+          lesson_id: lessonId,
+          url: l.url,
+          title: l.title,
+          created_at: '',
+          class_name: null,
+          lesson_start_time: null
+        })) as unknown as DocLinkWithLesson[]
+      })
+      .catch(() => { prepDocs.value = [] })
+      .finally(() => { prepDocsLoading.value = false })
+  }
+}
+
+/** 教案已填写的章节标签 */
+const prepPlanFilledSections = computed<string[]>(() => {
+  const p = prepPlan.value
+  if (!p) return []
+  const out: string[] = []
+  if (p.objectives) out.push('教学目标')
+  if (p.keyPoints) out.push('重难点')
+  if (p.preparation) out.push('教学准备')
+  if (p.process) out.push('教学过程')
+  if (p.reflection) out.push('课后反思')
+  return out
+})
+
+/** 教案是否有任何章节内容 */
+const prepPlanHasContent = computed<boolean>(() => {
+  const p = prepPlan.value
+  if (!p) return false
+  return !!(p.objectives || p.keyPoints || p.preparation || p.process || p.reflection)
+})
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+async function openDocLink(url: string): Promise<void> {
+  try {
+    await call(window.api.doc.openUrl(url))
+  } catch (e) {
+    message.error(`打开失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
 // ============ 授课流程 ============
 async function startTeaching(l: Lesson): Promise<void> {
   if (l.status === 'finished') return
@@ -732,6 +940,7 @@ async function startTeaching(l: Lesson): Promise<void> {
   totals.value = {}
   await loadStudents()
   await loadRecords()
+  loadPrepContext()
 }
 
 function onPopoverChange(s: Student, v: boolean): void {
@@ -895,6 +1104,103 @@ onUnmounted(() => {
 }
 .teaching-header {
   margin-bottom: 16px;
+}
+.prep-context-card {
+  margin-bottom: 16px;
+  background: #fafbfc;
+}
+.prep-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #4b5563;
+  margin-bottom: 8px;
+}
+.prep-meta-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+  color: #374151;
+}
+.prep-meta-size {
+  color: #9ca3af;
+}
+.prep-meta-names {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #6b7280;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.prep-meta-empty {
+  font-size: 12px;
+  color: #9ca3af;
+}
+.prep-doc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.prep-doc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+.prep-doc-title {
+  color: #2563eb;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prep-doc-title:hover {
+  text-decoration: underline;
+}
+.prep-plan-divider {
+  margin: 16px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4b5563;
+}
+.prep-plan-section {
+  min-height: 32px;
+}
+.prep-plan-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.prep-plan-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+.prep-plan-collapse {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+}
+.prep-plan-collapse :deep(.ant-collapse-header) {
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  padding: 8px 12px !important;
+}
+.prep-plan-collapse :deep(.ant-collapse-content-box) {
+  padding: 8px 12px !important;
+}
+.prep-plan-text {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .header-row {
   display: flex;
