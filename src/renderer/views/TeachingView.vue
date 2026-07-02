@@ -62,6 +62,14 @@
                 <a-tag v-if="l.ideaTitle" color="purple" size="small">
                   <BulbOutlined /> {{ l.ideaTitle }}
                 </a-tag>
+                <a-tag
+                  v-if="l.status === 'pending' && prepStageTag(l).text"
+                  :color="prepStageTag(l).color"
+                  size="small"
+                  :class="{ 'prep-not-ready': prepStageTag(l).notReady }"
+                >
+                  {{ prepStageTag(l).text }}
+                </a-tag>
               </div>
               <div class="lesson-card-actions" @click.stop>
                 <a-button
@@ -744,6 +752,22 @@ function statusColor(s: Lesson['status']): string {
   return s === 'pending' ? 'default' : s === 'teaching' ? 'processing' : 'success'
 }
 
+/** 课次备课阶段 → 标签文本/颜色/是否未就绪，用于在课次卡片上提示备课缺口 */
+function prepStageTag(l: Lesson): { text: string; color: string; notReady: boolean } {
+  const stage = l.prepStage
+  if (!stage) return { text: '', color: 'default', notReady: false }
+  switch (stage) {
+    case 'no-version':
+      return { text: '待关联版本', color: 'volcano', notReady: true }
+    case 'no-plan':
+      return { text: '待写教案', color: 'orange', notReady: true }
+    case 'plan-incomplete':
+      return { text: '待完善教案', color: 'gold', notReady: true }
+    case 'ready':
+      return { text: '备课就绪', color: 'green', notReady: false }
+  }
+}
+
 // ============ 数据加载 ============
 async function loadLessons(): Promise<void> {
   if (!selectedClassId.value || !selectedDate.value) {
@@ -1174,6 +1198,13 @@ onUnmounted(() => {
 }
 .lesson-card.is-finished {
   opacity: 0.6;
+}
+.prep-not-ready {
+  animation: prep-pulse 1.8s ease-in-out infinite;
+}
+@keyframes prep-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 .lesson-time {
   font-size: 13px;

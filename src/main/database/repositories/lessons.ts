@@ -1,5 +1,5 @@
 import { db, uuid } from '../db'
-import type { Lesson, LessonInput, LessonRecord, ScoreAction } from '@shared/types'
+import type { Lesson, LessonInput, LessonRecord, PrepStage, ScoreAction } from '@shared/types'
 import * as classRepo from './classes'
 
 interface LessonRow {
@@ -12,30 +12,49 @@ interface LessonRow {
   status: string
   feedback_sent: number
   created_at: string
+  prep_stage?: string | null
 }
 
-function mapRow(r: LessonRow, className?: string, ideaTitle?: string | null): Lesson {
+type JoinedLessonRow = LessonRow & { class_name?: string; idea_title?: string }
+
+/**
+ * 课次查询的共享 SQL 片段：
+ * - LEFT JOIN classes/idea_versions/ideas 补齐班级名与点子标题
+ * - LEFT JOIN lesson_plans + CASE WHEN 直接派生 prep_stage，
+ *   消除逐课次查询教案的 N+1 问题
+ */
+const LESSON_SELECT = `SELECT l.*, c.name as class_name, i.title as idea_title,
+               CASE
+                 WHEN l.idea_version_id IS NULL THEN 'no-version'
+                 WHEN lp.id IS NULL THEN 'no-plan'
+                 WHEN (lp.objectives IS NULL OR lp.objectives = '')
+                   OR (lp.process IS NULL OR lp.process = '') THEN 'plan-incomplete'
+                 ELSE 'ready'
+               END AS prep_stage
+               FROM lessons l
+               LEFT JOIN classes c ON c.id = l.class_id
+               LEFT JOIN idea_versions v ON v.id = l.idea_version_id
+               LEFT JOIN ideas i ON i.id = v.idea_id
+               LEFT JOIN lesson_plans lp ON lp.idea_version_id = l.idea_version_id`
+
+function mapRow(r: JoinedLessonRow): Lesson {
   return {
     id: r.id,
     classId: r.class_id,
-    className,
+    className: r.class_name,
     startTime: r.start_time,
     endTime: r.end_time,
     ideaVersionId: r.idea_version_id,
-    ideaTitle,
+    ideaTitle: r.idea_title ?? null,
     status: r.status as Lesson['status'],
     feedbackSent: r.feedback_sent === 1,
-    subject: r.subject
+    subject: r.subject,
+    prepStage: (r.prep_stage as PrepStage | null) ?? undefined
   }
 }
 
 export function list(q: { classId?: string; from?: string; to?: string }): Lesson[] {
-  let sql = `SELECT l.*, c.name as class_name, i.title as idea_title
-             FROM lessons l
-             LEFT JOIN classes c ON c.id = l.class_id
-             LEFT JOIN idea_versions v ON v.id = l.idea_version_id
-             LEFT JOIN ideas i ON i.id = v.idea_id
-             WHERE 1=1`
+  let sql = `${LESSON_SELECT} WHERE 1=1`
   const params: unknown[] = []
   if (q.classId) {
     sql += ` AND l.class_id = ?`
@@ -50,22 +69,15 @@ export function list(q: { classId?: string; from?: string; to?: string }): Lesso
     params.push(q.to)
   }
   sql += ` ORDER BY l.start_time ASC`
-  const rows = db().prepare(sql).all(...params) as Array<LessonRow & { class_name?: string; idea_title?: string }>
-  return rows.map((r) => mapRow(r, r.class_name, r.idea_title ?? null))
+  const rows = db().prepare(sql).all(...params) as JoinedLessonRow[]
+  return rows.map(mapRow)
 }
 
 export function get(id: string): Lesson | null {
   const row = db()
-    .prepare(
-      `SELECT l.*, c.name as class_name, i.title as idea_title
-       FROM lessons l
-       LEFT JOIN classes c ON c.id = l.class_id
-       LEFT JOIN idea_versions v ON v.id = l.idea_version_id
-       LEFT JOIN ideas i ON i.id = v.idea_id
-       WHERE l.id = ?`
-    )
-    .get(id) as (LessonRow & { class_name?: string; idea_title?: string }) | undefined
-  return row ? mapRow(row, row.class_name, row.idea_title ?? null) : null
+    .prepare(`${LESSON_SELECT} WHERE l.id = ?`)
+    .get(id) as JoinedLessonRow | undefined
+  return row ? mapRow(row) : null
 }
 
 export function create(input: LessonInput): Lesson {
