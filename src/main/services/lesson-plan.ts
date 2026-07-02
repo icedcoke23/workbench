@@ -20,6 +20,8 @@ import { join } from 'path'
 import type {
   LessonPlan,
   KnowledgeCoverage,
+  KnowledgeCoverageGap,
+  KnowledgeCoverageGaps,
   KnowledgeCoveragePoint,
   PlanDocLink,
   PlanResource,
@@ -778,5 +780,61 @@ export function buildKnowledgeCoverage(): KnowledgeCoverage {
     points,
     totalPoints: points.length,
     totalClasses: allClassIds.size
+  }
+}
+
+/**
+ * 知识点覆盖缺口（G23）：基于 buildKnowledgeCoverage 结果计算跨班级缺口。
+ *
+ * 「跟踪班级」=出现在任一知识点覆盖明细中的班级（即已在使用带知识点标签教案的班级）。
+ * 对每个已在 ≥1 个班级覆盖的知识点，找出其余跟踪班级中尚未覆盖该知识点的班级，
+ * 形成 (知识点 × 班级) 缺口条目，提醒教师补齐跨班级覆盖一致性。
+ *
+ * 不对「未在任何班级授课」的知识点计算缺口（无参照基准，避免噪音）。
+ */
+export function buildKnowledgeCoverageGaps(): KnowledgeCoverageGaps {
+  const cov = buildKnowledgeCoverage()
+  // 收集所有被跟踪的班级（classId -> className），取首次出现时的名称
+  const trackedClasses = new Map<string, string>()
+  for (const p of cov.points) {
+    for (const cls of p.classes) {
+      if (!trackedClasses.has(cls.classId)) {
+        trackedClasses.set(cls.classId, cls.className)
+      }
+    }
+  }
+
+  const gaps: KnowledgeCoverageGap[] = []
+  for (const p of cov.points) {
+    if (p.classCount === 0) continue // 未在任何班级授课，不构成缺口
+    const coveredIds = new Set(p.classes.map((c) => c.classId))
+    // 该知识点最近一次授课时间（在已覆盖班级中取最大 lastTaughtAt）
+    const taughtElsewhereAt =
+      p.classes
+        .map((c) => c.lastTaughtAt)
+        .filter((x): x is string => !!x)
+        .sort()
+        .pop() ?? null
+    for (const [classId, className] of trackedClasses) {
+      if (coveredIds.has(classId)) continue
+      gaps.push({
+        point: p.point,
+        classId,
+        className,
+        taughtClassCount: p.classCount,
+        taughtElsewhereAt
+      })
+    }
+  }
+  // 排序：按知识点名稳定排序，再按班级名
+  gaps.sort((a, b) => a.point.localeCompare(b.point) || a.className.localeCompare(b.className))
+
+  const affectedPoints = new Set(gaps.map((g) => g.point)).size
+  const affectedClasses = new Set(gaps.map((g) => g.classId)).size
+  return {
+    gaps,
+    totalGaps: gaps.length,
+    affectedPoints,
+    affectedClasses
   }
 }

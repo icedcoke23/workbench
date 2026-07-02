@@ -288,6 +288,30 @@ export interface KnowledgeCoverage {
   totalPoints: number
   totalClasses: number
 }
+/**
+ * 知识点覆盖缺口（G23）：某知识点已被部分跟踪班级覆盖，但仍有其他跟踪班级尚未覆盖。
+ * 用于提醒教师补齐跨班级的覆盖一致性。「跟踪班级」=出现在任一知识点覆盖明细中的班级。
+ */
+export interface KnowledgeCoverageGap {
+  /** 知识点名称 */
+  point: string
+  /** 尚未覆盖该知识点的班级 ID */
+  classId: ID
+  /** 尚未覆盖该知识点的班级名 */
+  className: string
+  /** 该知识点已在多少个班级覆盖（不含当前班级） */
+  taughtClassCount: number
+  /** 该知识点最近一次在其他班级授课的时间，ISO；无则 null */
+  taughtElsewhereAt: string | null
+}
+export interface KnowledgeCoverageGaps {
+  gaps: KnowledgeCoverageGap[]
+  totalGaps: number
+  /** 涉及的知识点数 */
+  affectedPoints: number
+  /** 涉及的班级数（有缺口待补的班级） */
+  affectedClasses: number
+}
 export interface LessonInput {
   classId: ID
   startTime: string

@@ -135,6 +135,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('lessonPlan:knowledgeCoverage', () =>
     tryRun(() => lessonPlanService.buildKnowledgeCoverage())
   )
+  ipcMain.handle('lessonPlan:knowledgeCoverageGaps', () =>
+    tryRun(() => lessonPlanService.buildKnowledgeCoverageGaps())
+  )
   ipcMain.handle('lessonPlan:review', async (e, planId) =>
     tryRunAsync(async () => {
       const win = BrowserWindow.fromWebContents(e.sender) ?? getMainWindow()

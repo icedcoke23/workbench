@@ -462,6 +462,49 @@
           style="margin-bottom: 16px"
         />
 
+        <!-- G23: 跨班级知识点缺口提醒 -->
+        <a-alert
+          v-if="!knowledgeCoverageLoading && coverageGaps.totalGaps > 0"
+          type="warning"
+          show-icon
+          style="margin-bottom: 16px"
+        >
+          <template #message>
+            <span>
+              发现 {{ coverageGaps.totalGaps }} 个待补覆盖（涉及
+              {{ coverageGaps.affectedPoints }} 个知识点、{{ coverageGaps.affectedClasses }} 个班级）
+            </span>
+          </template>
+          <template #description>
+            <div class="coverage-gaps">
+              <div
+                v-for="grp in gapsByPointLimited"
+                :key="grp.point"
+                class="gap-row"
+              >
+                <a-tag color="geekblue">{{ grp.point }}</a-tag>
+                <span class="gap-label">未覆盖：</span>
+                <a-tag
+                  v-for="cls in grp.classes"
+                  :key="cls.classId"
+                  color="orange"
+                >
+                  {{ cls.className }}
+                </a-tag>
+                <span v-if="grp.taughtElsewhereAt" class="gap-elsewhere">
+                  （已在 {{ grp.taughtClassCount }} 个班级授课，最近 {{ formatDate(grp.taughtElsewhereAt) }}）
+                </span>
+                <span v-else class="gap-elsewhere text-muted">
+                  （已排课但未结课）
+                </span>
+              </div>
+              <div v-if="gapsHiddenPointCount > 0" class="gap-more text-muted">
+                还有 {{ gapsHiddenPointCount }} 个知识点的缺口未展示，见下方表格
+              </div>
+            </div>
+          </template>
+        </a-alert>
+
         <a-spin :spinning="knowledgeCoverageLoading">
           <a-empty
             v-if="!knowledgeCoverageLoading && knowledgeCoverage.points.length === 0"
@@ -1567,6 +1610,7 @@ import type {
   PrepReadinessSnapshot,
   PrepStage,
   KnowledgeCoverage,
+  KnowledgeCoverageGaps,
   ScratchSavePayload,
   VersionMeta,
   DocLinkWithLesson,
@@ -1668,6 +1712,8 @@ const readinessTrendLoading = ref(false)
 // G22: 知识点覆盖度（按教案知识点标签聚合班级覆盖情况）
 const knowledgeCoverage = ref<KnowledgeCoverage>({ points: [], totalPoints: 0, totalClasses: 0 })
 const knowledgeCoverageLoading = ref(false)
+// G23: 知识点覆盖缺口（跨班级未覆盖项），与覆盖度一同加载
+const coverageGaps = ref<KnowledgeCoverageGaps>({ gaps: [], totalGaps: 0, affectedPoints: 0, affectedClasses: 0 })
 const planEditorVisible = ref(false)
 const planEditorIsEdit = ref(false)
 const planEditorVersionHasPlan = ref(false)
@@ -2001,19 +2047,51 @@ const coverageColumns = [
   { title: '班级覆盖明细', key: 'classes' }
 ]
 
-/** 加载知识点覆盖度（按教案知识点标签聚合班级覆盖情况） */
+/** 加载知识点覆盖度（按教案知识点标签聚合班级覆盖情况）；同步加载 G23 缺口 */
 async function loadKnowledgeCoverage(): Promise<void> {
   knowledgeCoverageLoading.value = true
   try {
-    const cov = await call(window.api.lessonPlan.knowledgeCoverage())
+    // 覆盖度与缺口同源，并行加载保持一致
+    const [cov, gaps] = await Promise.all([
+      call(window.api.lessonPlan.knowledgeCoverage()),
+      call(window.api.lessonPlan.knowledgeCoverageGaps())
+    ])
     knowledgeCoverage.value = cov
+    coverageGaps.value = gaps
   } catch (e) {
     message.error(`加载知识点覆盖度失败：${String(e instanceof Error ? e.message : e)}`)
     knowledgeCoverage.value = { points: [], totalPoints: 0, totalClasses: 0 }
+    coverageGaps.value = { gaps: [], totalGaps: 0, affectedPoints: 0, affectedClasses: 0 }
   } finally {
     knowledgeCoverageLoading.value = false
   }
 }
+
+/**
+ * G23: 将缺口按知识点分组，便于在提醒面板中按知识点展示缺失班级集合。
+ * 每个分组含：知识点名、未覆盖班级列表、最近一次授课时间、已覆盖班级数。
+ */
+const gapsByPoint = computed<
+  Array<{
+    point: string
+    classes: Array<{ classId: string; className: string }>
+    taughtElsewhereAt: string | null
+    taughtClassCount: number
+  }>
+>(() => {
+  const map = new Map<string, { point: string; classes: Array<{ classId: string; className: string }>; taughtElsewhereAt: string | null; taughtClassCount: number }>()
+  for (const g of coverageGaps.value.gaps) {
+    if (!map.has(g.point)) {
+      map.set(g.point, { point: g.point, classes: [], taughtElsewhereAt: g.taughtElsewhereAt, taughtClassCount: g.taughtClassCount })
+    }
+    map.get(g.point)!.classes.push({ classId: g.classId, className: g.className })
+  }
+  return [...map.values()]
+})
+/** 缺口分组展示上限，超出部分折叠提示，避免面板过长 */
+const GAP_DISPLAY_LIMIT = 6
+const gapsByPointLimited = computed(() => gapsByPoint.value.slice(0, GAP_DISPLAY_LIMIT))
+const gapsHiddenPointCount = computed(() => Math.max(0, gapsByPoint.value.length - GAP_DISPLAY_LIMIT))
 
 function fmtOverviewTime(iso: string): string {
   return dayjs(iso).format('MM-DD HH:mm')
@@ -3672,6 +3750,30 @@ onUnmounted(() => {
 .coverage-classes .cov-date {
   margin-left: 4px;
   color: #6b7280;
+  font-size: 11px;
+}
+/* G23: 缺口提醒面板 */
+.coverage-gaps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.coverage-gaps .gap-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.coverage-gaps .gap-label {
+  color: #6b7280;
+}
+.coverage-gaps .gap-elsewhere {
+  color: #6b7280;
+  font-size: 11px;
+}
+.coverage-gaps .gap-more {
+  margin-top: 2px;
   font-size: 11px;
 }
 .plan-usage {

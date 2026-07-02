@@ -28,6 +28,7 @@ import type {
   PrepOverview,
   PrepReadinessSnapshot,
   KnowledgeCoverage,
+  KnowledgeCoverageGaps,
   Resource,
   ResourceInput,
   Result,
@@ -53,7 +54,7 @@ export const API_METHODS: Record<string, string[]> = {
   class: ['list', 'get', 'create', 'update', 'remove', 'members', 'addMembers', 'removeMember'],
   lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'setReflection', 'assess', 'records', 'score', 'pick'],
   idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'updateVersion', 'removeVersion', 'getVersionMeta'],
-  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'clone', 'generateDraft', 'exportMarkdown', 'exportPdf', 'prepOverview', 'readinessTrend', 'knowledgeCoverage', 'review', 'listResources', 'attachResource', 'detachResource'],
+  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'clone', 'generateDraft', 'exportMarkdown', 'exportPdf', 'prepOverview', 'readinessTrend', 'knowledgeCoverage', 'knowledgeCoverageGaps', 'review', 'listResources', 'attachResource', 'detachResource'],
   lessonPlanTemplate: ['list', 'create', 'update', 'remove'],
   todo: ['list', 'create', 'update', 'remove', 'regenerate'],
   resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags', 'readFile'],
@@ -139,6 +140,7 @@ export interface WorkbenchAPI {
     prepOverview: () => Promise<Result<PrepOverview>>
     readinessTrend: (days?: number) => Promise<Result<PrepReadinessSnapshot[]>>
     knowledgeCoverage: () => Promise<Result<KnowledgeCoverage>>
+    knowledgeCoverageGaps: () => Promise<Result<KnowledgeCoverageGaps>>
     review: (planId: ID) => Promise<Result<string>>
   }
   // 教案模板（用户自定义）
