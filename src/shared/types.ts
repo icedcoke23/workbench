@@ -118,6 +118,8 @@ export interface LessonPlan {
   process?: string | null
   reflection?: string | null
   durationMinutes?: number | null
+  /** 知识点标签（G21，如「循环」「变量」「碰撞检测」），供覆盖度看板聚合 */
+  knowledgePoints?: string[]
   createdAt: string
   updatedAt: string
   /** 使用该教案（关联版本）的课次数（list 时按需聚合，可能为空） */
@@ -167,6 +169,8 @@ export interface LessonPlanInput {
   process?: string | null
   reflection?: string | null
   durationMinutes?: number | null
+  /** G21: 知识点标签；undefined 不修改，null/数组显式覆盖 */
+  knowledgePoints?: string[] | null
 }
 /** 教案克隆入参：将现有教案内容复制到新版本（反思不复制） */
 export interface LessonPlanCloneInput {

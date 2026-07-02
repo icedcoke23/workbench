@@ -30,6 +30,8 @@ export function initDatabase(dbPath: string): DB {
   migrateLessonPlansParent(db)
   // 幂等迁移：为 doc_links 表补充 plan_id 列（教案级文档挂载）
   migrateDocLinksPlanId(db)
+  // 幂等迁移：为 lesson_plans 表补充 knowledge_points 列（G21 知识点标签）
+  migrateLessonPlansKnowledgePoints(db)
 
   // 先暴露实例，种子数据初始化内部需要通过 db() 取实例
   dbInstance = db
@@ -119,6 +121,19 @@ function migrateDocLinksPlanId(db: DB): void {
   const names = new Set(cols.map((c) => c.name))
   if (!names.has('plan_id')) {
     db.exec(`ALTER TABLE doc_links ADD COLUMN plan_id TEXT`)
+  }
+}
+
+/**
+ * 幂等迁移：为 lesson_plans 表追加 knowledge_points 列（G21 知识点标签）。
+ * 存储 JSON 数组字符串（如 '["循环","变量"]'），默认 '[]'。
+ * 供后续跨班级知识点覆盖度看板聚合分析。
+ */
+function migrateLessonPlansKnowledgePoints(db: DB): void {
+  const cols = db.prepare(`PRAGMA table_info(lesson_plans)`).all() as Array<{ name: string }>
+  const names = new Set(cols.map((c) => c.name))
+  if (!names.has('knowledge_points')) {
+    db.exec(`ALTER TABLE lesson_plans ADD COLUMN knowledge_points TEXT DEFAULT '[]'`)
   }
 }
 

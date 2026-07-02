@@ -1,4 +1,4 @@
-import { db, uuid, parseJSON } from '../db'
+import { db, uuid, parseJSON, stringifyJSON } from '../db'
 import type {
   LessonPlan,
   LessonPlanCloneInput,
@@ -21,6 +21,7 @@ interface LessonPlanRow {
   reflection: string | null
   duration_minutes: number | null
   parent_plan_id: string | null
+  knowledge_points: string | null
   created_at: string
   updated_at: string
 }
@@ -52,6 +53,7 @@ function mapRow(r: JoinedRow): LessonPlan {
     durationMinutes: r.duration_minutes,
     parentPlanId: r.parent_plan_id,
     parentPlanTitle: r.parent_plan_title ?? null,
+    knowledgePoints: parseJSON<string[]>(r.knowledge_points, []),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     lessonCount: r.lesson_count ?? 0,
@@ -164,7 +166,9 @@ export function clonePlan(sourcePlanId: string, input: LessonPlanCloneInput): Le
     preparation: source.preparation,
     process: source.process,
     reflection: null,
-    durationMinutes: source.durationMinutes
+    durationMinutes: source.durationMinutes,
+    // G21: 一并复制知识点标签
+    knowledgePoints: source.knowledgePoints ?? []
   })
 
   // 记录克隆血统：parent_plan_id 指向源教案，便于追溯派生关系
@@ -239,6 +243,24 @@ function normNum(v: number | null | undefined): number | null {
 }
 
 /**
+ * 知识点标签归一化（G21）：去空白、去空、去重（保留顺序），返回清洗后的数组。
+ * 入参 null/undefined 一律视为空数组。
+ */
+function normTags(v: string[] | null | undefined): string[] {
+  if (!v || !Array.isArray(v)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of v) {
+    const t = typeof raw === 'string' ? raw.trim() : ''
+    if (t && !seen.has(t)) {
+      seen.add(t)
+      out.push(t)
+    }
+  }
+  return out
+}
+
+/**
  * 按 ideaVersionId 幂等 upsert 教案。
  * - 已存在：仅更新传入的字段（undefined 表示不修改）
  * - 不存在：插入新行
@@ -255,6 +277,9 @@ export function upsert(input: LessonPlanInput): LessonPlan {
     if (input.process !== undefined) next.process = normStr(input.process)
     if (input.reflection !== undefined) next.reflection = normStr(input.reflection)
     if (input.durationMinutes !== undefined) next.duration_minutes = normNum(input.durationMinutes)
+    if (input.knowledgePoints !== undefined) {
+      next.knowledge_points = stringifyJSON(normTags(input.knowledgePoints))
+    }
     if (Object.keys(next).length === 0) return existing
     const sets = Object.keys(next).map((k) => `${k} = ?`).join(', ')
     db().prepare(`UPDATE lesson_plans SET ${sets} WHERE id = ?`).run(...Object.values(next), existing.id)
@@ -263,8 +288,8 @@ export function upsert(input: LessonPlanInput): LessonPlan {
   const id = uuid()
   db()
     .prepare(
-      `INSERT INTO lesson_plans (id, idea_version_id, title, objectives, key_points, preparation, process, reflection, duration_minutes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO lesson_plans (id, idea_version_id, title, objectives, key_points, preparation, process, reflection, duration_minutes, knowledge_points)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -275,7 +300,8 @@ export function upsert(input: LessonPlanInput): LessonPlan {
       normStr(input.preparation ?? null),
       normStr(input.process ?? null),
       normStr(input.reflection ?? null),
-      normNum(input.durationMinutes ?? null)
+      normNum(input.durationMinutes ?? null),
+      stringifyJSON(normTags(input.knowledgePoints ?? undefined))
     )
   return get(id)!
 }

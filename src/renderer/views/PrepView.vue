@@ -399,6 +399,17 @@
                 </span>
               </div>
 
+              <!-- G21: 知识点标签 -->
+              <div v-if="item.knowledgePoints && item.knowledgePoints.length" class="plan-knowledge">
+                <TagsOutlined />
+                <a-tag
+                  v-for="kp in item.knowledgePoints"
+                  :key="kp"
+                  color="geekblue"
+                  size="small"
+                >{{ kp }}</a-tag>
+              </div>
+
               <!-- 历史使用情况：班级/科目/课次数 -->
               <div v-if="item.lessonCount || (item.usedClasses && item.usedClasses.length)" class="plan-usage">
                 <span v-if="item.lessonCount" class="plan-usage-item">
@@ -921,6 +932,15 @@
             style="width: 200px"
           />
         </a-form-item>
+        <a-form-item label="知识点标签">
+          <a-select
+            v-model:value="planForm.knowledgePoints"
+            mode="tags"
+            placeholder="回车添加知识点，如「循环」「变量」「碰撞检测」"
+            :token-separators="[',']"
+            style="width: 100%"
+          />
+        </a-form-item>
 
         <!-- AI 辅助生成教案草稿 -->
         <div class="plan-ai-toolbar">
@@ -1421,6 +1441,7 @@ import {
   CloseOutlined,
   BranchesOutlined,
   ForkOutlined,
+  TagsOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined
 } from '@ant-design/icons-vue'
@@ -1669,6 +1690,8 @@ const planForm = reactive<{
   process: string
   reflection: string
   durationMinutes: number | null
+  /** G21: 知识点标签 */
+  knowledgePoints: string[]
 }>({
   ideaVersionId: undefined,
   ideaId: undefined,
@@ -1678,7 +1701,8 @@ const planForm = reactive<{
   preparation: '',
   process: '',
   reflection: '',
-  durationMinutes: null
+  durationMinutes: null,
+  knowledgePoints: []
 })
 
 // ============ 教学过程环节时长汇总校验（G8-2） ============
@@ -1967,6 +1991,7 @@ function resetPlanForm(): void {
   planForm.process = ''
   planForm.reflection = ''
   planForm.durationMinutes = null
+  planForm.knowledgePoints = []
   planEditorVersionHasPlan.value = false
   editingPlanId.value = null
   planReviewText.value = ''
@@ -2274,6 +2299,7 @@ async function openPlanForVersion(versionId: string): Promise<void> {
       planForm.process = existing.process ?? ''
       planForm.reflection = existing.reflection ?? ''
       planForm.durationMinutes = existing.durationMinutes ?? null
+      planForm.knowledgePoints = existing.knowledgePoints ?? []
       // 加载已挂载的结构化素材 chip
       planResources.value = await call(window.api.lessonPlan.listResources(existing.id))
       // 加载教案级文档（G17）
@@ -2359,7 +2385,8 @@ async function submitPlan(): Promise<void> {
       preparation: planForm.preparation.trim() || null,
       process: planForm.process.trim() || null,
       reflection: planForm.reflection.trim() || null,
-      durationMinutes: planForm.durationMinutes
+      durationMinutes: planForm.durationMinutes,
+      knowledgePoints: planForm.knowledgePoints
     }
     const wasEdit = planEditorIsEdit.value
     const saved = await call(window.api.lessonPlan.upsert(input))
@@ -2539,7 +2566,8 @@ async function reviewCurrentPlan(): Promise<void> {
       preparation: planForm.preparation.trim() || null,
       process: planForm.process.trim() || null,
       reflection: planForm.reflection.trim() || null,
-      durationMinutes: planForm.durationMinutes
+      durationMinutes: planForm.durationMinutes,
+      knowledgePoints: planForm.knowledgePoints
     }
     const saved = await call(window.api.lessonPlan.upsert(input))
     editingPlanId.value = saved.id
@@ -3509,6 +3537,19 @@ onUnmounted(() => {
 .plan-empty-sections {
   font-size: 12px;
   color: #9ca3af;
+}
+/* G21: 知识点标签 */
+.plan-knowledge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: #6b7280;
+  font-size: 12px;
+}
+.plan-knowledge .anticon {
+  margin-right: 2px;
 }
 .plan-usage {
   display: flex;

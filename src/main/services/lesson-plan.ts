@@ -240,6 +240,9 @@ function buildLessonPlanMarkdown(
   if (plan.ideaTitle) metaParts.push(`点子：${plan.ideaTitle}`)
   if (plan.versionName) metaParts.push(`版本：${plan.versionName}`)
   if (plan.durationMinutes) metaParts.push(`预计时长：${plan.durationMinutes} 分钟`)
+  if (plan.knowledgePoints && plan.knowledgePoints.length) {
+    metaParts.push(`知识点：${plan.knowledgePoints.join('、')}`)
+  }
   metaParts.push(`创建：${plan.createdAt}`)
   metaParts.push(`更新：${plan.updatedAt}`)
 
@@ -376,6 +379,9 @@ function buildLessonPlanHtml(
   if (plan.ideaTitle) metaParts.push(`点子：${plan.ideaTitle}`)
   if (plan.versionName) metaParts.push(`版本：${plan.versionName}`)
   if (plan.durationMinutes) metaParts.push(`预计时长：${plan.durationMinutes} 分钟`)
+  if (plan.knowledgePoints && plan.knowledgePoints.length) {
+    metaParts.push(`知识点：${plan.knowledgePoints.join('、')}`)
+  }
   metaParts.push(`创建：${plan.createdAt.slice(0, 16).replace('T', ' ')}`)
   metaParts.push(`更新：${plan.updatedAt.slice(0, 16).replace('T', ' ')}`)
 

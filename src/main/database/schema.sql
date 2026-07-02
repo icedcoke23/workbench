@@ -64,6 +64,8 @@ CREATE INDEX IF NOT EXISTS idx_idea_versions_idea ON idea_versions(idea_id);
 
 -- 教案（与点子版本 1:1 关联，结构化备课内容）
 -- parent_plan_id 记录克隆血统：由 clonePlan 创建时指向源教案，便于追溯派生关系
+-- knowledge_points 存 JSON 数组（知识点标签，如「循环」「变量」「碰撞检测」），
+--   供后续跨班级覆盖度看板聚合分析。
 CREATE TABLE IF NOT EXISTS lesson_plans (
   id TEXT PRIMARY KEY,
   idea_version_id TEXT NOT NULL UNIQUE,
@@ -75,6 +77,7 @@ CREATE TABLE IF NOT EXISTS lesson_plans (
   reflection TEXT,
   duration_minutes INTEGER,
   parent_plan_id TEXT,
+  knowledge_points TEXT DEFAULT '[]',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (idea_version_id) REFERENCES idea_versions(id) ON DELETE CASCADE,
