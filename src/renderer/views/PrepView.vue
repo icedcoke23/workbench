@@ -280,6 +280,43 @@
         </a-list>
       </a-tab-pane>
 
+      <!-- ============ 备课日历 ============ -->
+      <a-tab-pane key="calendar">
+        <template #tab>
+          <span><CalendarOutlined /> 备课日历</span>
+        </template>
+
+        <div class="tab-toolbar">
+          <span class="section-title">备课日历</span>
+          <a-space>
+            <a-button @click="shiftCalendarWeek(-1)"><LeftOutlined /> 上一周</a-button>
+            <a-button @click="shiftCalendarWeek(0)">本周</a-button>
+            <a-button @click="shiftCalendarWeek(1)">下一周 <RightOutlined /></a-button>
+          </a-space>
+        </div>
+
+        <div class="calendar-range">
+          {{ calendarRangeText }}
+          <span class="calendar-range-sub">（共 {{ calendarLessons.length }} 节课次）</span>
+        </div>
+
+        <a-alert
+          type="info"
+          show-icon
+          :message="`按备课阶段着色：绿=就绪 / 橙=待完善 / 红=待写教案 / 灰=待关联版本。点击课次可跳转编辑教案。`"
+          style="margin: 12px 0"
+        />
+
+        <a-spin :spinning="calendarLoading">
+          <WeekSchedule
+            :lessons="calendarLessons"
+            :show-prep-stage="true"
+            :show-prep-legend="true"
+            @lesson-click="onCalendarLessonClick"
+          />
+        </a-spin>
+      </a-tab-pane>
+
       <!-- ============ 资源库 ============ -->
       <a-tab-pane key="resources">
         <template #tab>
@@ -996,12 +1033,16 @@ import {
   ScheduleOutlined,
   ThunderboltOutlined,
   DownloadOutlined,
-  CopyOutlined
+  CopyOutlined,
+  CalendarOutlined,
+  LeftOutlined,
+  RightOutlined
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { call } from '@renderer/api'
 import { subscribeRefresh, subscribeNewItem } from '@renderer/composables/useShortcuts'
+import WeekSchedule from '@renderer/components/WeekSchedule.vue'
 import {
   LESSON_PLAN_TEMPLATES,
   LESSON_PLAN_TEMPLATE_CATEGORY_TEXT,
@@ -1027,7 +1068,7 @@ import type {
 } from '@shared/types'
 
 // ============ 公共 ============
-const activeTab = ref<'ideas' | 'plans' | 'resources' | 'docs'>('ideas')
+const activeTab = ref<'ideas' | 'plans' | 'calendar' | 'resources' | 'docs'>('ideas')
 
 function formatDate(d: string): string {
   return d ? dayjs(d).format('YYYY-MM-DD HH:mm') : '-'
@@ -1217,6 +1258,56 @@ function overviewStageTag(stage: PrepStage): { text: string; color: string } {
 
 function fmtOverviewTime(iso: string): string {
   return dayjs(iso).format('MM-DD HH:mm')
+}
+
+// ============ 备课日历（G7-2） ============
+const calendarLessons = ref<Lesson[]>([])
+const calendarLoading = ref(false)
+// 周偏移：0=本周，-1=上周，1=下周，依此类推
+const calendarWeekOffset = ref(0)
+
+const calendarRangeText = computed(() => {
+  const base = dayjs().startOf('week').add(1, 'day') // 周一为一周起点
+  const start = base.add(calendarWeekOffset.value, 'week')
+  const end = start.add(6, 'day')
+  return `${start.format('YYYY-MM-DD')} ~ ${end.format('YYYY-MM-DD')}`
+})
+
+async function loadCalendarLessons(): Promise<void> {
+  calendarLoading.value = true
+  try {
+    const base = dayjs().startOf('week').add(1, 'day')
+    const start = base.add(calendarWeekOffset.value, 'week')
+    const end = start.add(7, 'day')
+    calendarLessons.value = await call(
+      window.api.lesson.list({ from: start.format('YYYY-MM-DD'), to: end.format('YYYY-MM-DD') })
+    )
+  } catch (e) {
+    message.error(`加载课次日历失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    calendarLoading.value = false
+  }
+}
+
+function shiftCalendarWeek(offset: number): void {
+  if (offset === 0) {
+    calendarWeekOffset.value = 0
+  } else {
+    calendarWeekOffset.value += offset
+  }
+  loadCalendarLessons()
+}
+
+function onCalendarLessonClick(lesson: Lesson): void {
+  if (lesson.ideaVersionId) {
+    openPlanForVersion(lesson.ideaVersionId)
+  } else {
+    Modal.info({
+      title: '该课次尚未关联备课版本',
+      content: '请到「教学」页为该课次关联点子版本后再编写教案。',
+      okText: '知道了'
+    })
+  }
 }
 
 /** 计算教案已填写的章节标签 */
@@ -2103,6 +2194,7 @@ onMounted(() => {
   loadDocLinks()
   loadPlans()
   loadPrepOverview()
+  loadCalendarLessons()
 
   const subscribe = window.events['scratch:save-request'] as unknown as SubscribeSave
   offScratchSave = subscribe((payload) => {
@@ -2133,6 +2225,7 @@ onMounted(() => {
     loadDocLinks()
     loadPlans()
     loadPrepOverview()
+    loadCalendarLessons()
   })
   // 订阅全局新增事件：触发新建点子弹窗
   offNewItem = subscribeNewItem(openNewIdeaModal, 'prep')
@@ -2159,6 +2252,20 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+.calendar-range {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2937;
+  padding: 8px 12px;
+  background: #f5f7ff;
+  border-radius: 6px;
+}
+.calendar-range-sub {
+  font-weight: 400;
+  color: #6b7280;
+  font-size: 13px;
+  margin-left: 4px;
 }
 .section-title {
   font-size: 18px;
