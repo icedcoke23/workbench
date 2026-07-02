@@ -859,6 +859,13 @@
               :rows="6"
               placeholder="课堂推进步骤，可分阶段描述；可点击上方按钮快速插入教学环节片段"
             />
+            <a-alert
+              v-if="planForm.process"
+              :type="processDurationStatus"
+              show-icon
+              :message="processDurationHint"
+              style="margin-top: 8px"
+            />
           </a-collapse-panel>
           <a-collapse-panel key="reflection" header="课后反思">
             <a-textarea
@@ -1246,7 +1253,68 @@ const planForm = reactive<{
   durationMinutes: null
 })
 
-/** 教案编辑器中可选的点子列表 */
+// ============ 教学过程环节时长汇总校验（G8-2） ============
+/**
+ * 解析「教学过程」中形如 `### 环节名（约X分钟）` / `（约X-Y分钟）` 的时长标注，
+ * 汇总各环节时长并与预计时长对比，供编辑器实时提示。
+ */
+const processDurationSummary = computed(() => {
+  const text = planForm.process || ''
+  const segments: { name: string; minutes: number }[] = []
+  // 按行扫描三级标题 `### 环节名（约X分钟）`，提取环节名与时长
+  const lines = text.split('\n')
+  const segRe = /^###\s+(.+?)（约\s*(\d+)\s*(?:[-~到]\s*(\d+))?\s*分钟）/
+  let currentName: string | null = null
+  let currentMin: number | null = null
+  for (const line of lines) {
+    const m = line.match(segRe)
+    if (m) {
+      if (currentName !== null && currentMin !== null) {
+        segments.push({ name: currentName, minutes: currentMin })
+      }
+      currentName = m[1].trim()
+      currentMin = m[3] ? Math.round((Number(m[2]) + Number(m[3])) / 2) : Number(m[2])
+    }
+  }
+  if (currentName !== null && currentMin !== null) {
+    segments.push({ name: currentName, minutes: currentMin })
+  }
+  const total = segments.reduce((s, x) => s + x.minutes, 0)
+  const expected = planForm.durationMinutes
+  return { segments, total, expected }
+})
+
+/** 时长校验状态：success / warning / error / info */
+const processDurationStatus = computed<'success' | 'warning' | 'error' | 'info'>(() => {
+  const { total, expected } = processDurationSummary.value
+  if (total === 0) return 'info'
+  if (expected == null) return 'info'
+  const diff = Math.abs(total - expected)
+  if (diff === 0) return 'success'
+  if (diff <= 5) return 'warning'
+  return 'error'
+})
+
+/** 时长校验提示文案 */
+const processDurationHint = computed(() => {
+  const { segments, total, expected } = processDurationSummary.value
+  if (total === 0) {
+    return '未识别到环节时长标注（建议在环节标题后加「（约X分钟）」）'
+  }
+  const segPart = segments.map((s) => `${s.name} ${s.minutes}分钟`).join(' · ')
+  if (expected == null) {
+    return `环节总时长 ${total} 分钟（${segPart}）— 未设置预计时长`
+  }
+  const diff = total - expected
+  if (diff === 0) {
+    return `环节总时长 ${total} 分钟，与预计时长匹配（${segPart}）`
+  }
+  const sign = diff > 0 ? '超出' : '少'
+  const abs = Math.abs(diff)
+  return `环节总时长 ${total} 分钟，${sign}预计时长 ${expected} 分钟 ${abs} 分钟（${segPart}）`
+})
+
+
 const planIdeaOptions = computed(() =>
   ideas.value.map((i) => ({ value: i.id, label: i.title }))
 )
