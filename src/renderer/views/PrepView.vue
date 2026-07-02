@@ -254,6 +254,13 @@
                     <a-tag v-if="item.derivedCount && item.derivedCount > 0" color="geekblue">
                       <ForkOutlined /> 已派生 {{ item.derivedCount }} 份
                     </a-tag>
+                    <a-tooltip
+                      :title="`${cardReadiness(item).passedCount}/${cardReadiness(item).totalCount} 项就绪：${cardReadiness(item).items.map((i) => (i.passed ? '✓' : '✗') + i.label).join(' · ')}`"
+                    >
+                      <a-tag :color="readinessLevelColor(cardReadiness(item).level)">
+                        <CheckCircleOutlined /> {{ readinessLevelText(cardReadiness(item).level) }} {{ cardReadiness(item).pct }}%
+                      </a-tag>
+                    </a-tooltip>
                   </a-space>
                 </div>
               </template>
@@ -959,6 +966,45 @@
             />
           </a-collapse-panel>
         </a-collapse>
+
+        <!-- 备课就绪度清单（G15）：随编辑实时刷新，逐项引导补齐 -->
+        <div class="plan-readiness-panel">
+          <div class="plan-readiness-head">
+            <span class="plan-readiness-title">
+              <CheckCircleOutlined /> 备课就绪度
+            </span>
+            <a-tag :color="readinessLevelColor(planEditorReadiness.level)">
+              {{ readinessLevelText(planEditorReadiness.level) }}
+            </a-tag>
+            <a-progress
+              :percent="planEditorReadiness.pct"
+              :stroke-color="readinessLevelColor(planEditorReadiness.level) === 'green' ? '#52c41a' : readinessLevelColor(planEditorReadiness.level) === 'gold' ? '#faad14' : '#ff4d4f'"
+              :show-info="true"
+              size="small"
+              style="flex: 1; min-width: 120px; margin: 0 12px"
+            />
+            <span class="plan-readiness-count">
+              {{ planEditorReadiness.passedCount }} / {{ planEditorReadiness.totalCount }}
+            </span>
+          </div>
+          <div class="plan-readiness-items">
+            <a-tooltip
+              v-for="item in planEditorReadiness.items"
+              :key="item.key"
+              :title="item.hint"
+            >
+              <span
+                class="plan-readiness-item"
+                :class="{ 'is-passed': item.passed, 'is-missing': !item.passed }"
+              >
+                <CheckCircleOutlined v-if="item.passed" />
+                <ClockCircleOutlined v-else />
+                {{ item.label }}
+              </span>
+            </a-tooltip>
+          </div>
+        </div>
+
         <a-alert
           v-if="planEditorVersionHasPlan && !planEditorIsEdit"
           type="warning"
@@ -1249,7 +1295,9 @@ import {
   TagOutlined,
   CloseOutlined,
   BranchesOutlined,
-  ForkOutlined
+  ForkOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
@@ -1265,6 +1313,12 @@ import type { LessonPlanTemplateCategory } from '@shared/lesson-plan-templates'
 import { SaveOutlined } from '@ant-design/icons-vue'
 import { TEACHING_SEGMENT_SNIPPETS } from '@shared/lesson-plan-snippets'
 import type { TeachingSegmentSnippet } from '@shared/lesson-plan-snippets'
+import {
+  computePlanReadiness,
+  parseProcessSegments,
+  readinessLevelText,
+  readinessLevelColor
+} from '@shared/plan-readiness'
 import type {
   Idea,
   IdeaStatus,
@@ -1492,26 +1546,8 @@ const planForm = reactive<{
  * 汇总各环节时长并与预计时长对比，供编辑器实时提示。
  */
 const processDurationSummary = computed(() => {
-  const text = planForm.process || ''
-  const segments: { name: string; minutes: number }[] = []
-  // 按行扫描三级标题 `### 环节名（约X分钟）`，提取环节名与时长
-  const lines = text.split('\n')
-  const segRe = /^###\s+(.+?)（约\s*(\d+)\s*(?:[-~到]\s*(\d+))?\s*分钟）/
-  let currentName: string | null = null
-  let currentMin: number | null = null
-  for (const line of lines) {
-    const m = line.match(segRe)
-    if (m) {
-      if (currentName !== null && currentMin !== null) {
-        segments.push({ name: currentName, minutes: currentMin })
-      }
-      currentName = m[1].trim()
-      currentMin = m[3] ? Math.round((Number(m[2]) + Number(m[3])) / 2) : Number(m[2])
-    }
-  }
-  if (currentName !== null && currentMin !== null) {
-    segments.push({ name: currentName, minutes: currentMin })
-  }
+  // 复用共享解析逻辑（G15 统一），与就绪度计算保持同一规则源
+  const segments = parseProcessSegments(planForm.process)
   const total = segments.reduce((s, x) => s + x.minutes, 0)
   const expected = planForm.durationMinutes
   return { segments, total, expected }
@@ -1547,6 +1583,35 @@ const processDurationHint = computed(() => {
   return `环节总时长 ${total} 分钟，${sign}预计时长 ${expected} 分钟 ${abs} 分钟（${segPart}）`
 })
 
+// ============ 备课就绪度清单（G15） ============
+/**
+ * 编辑器实时就绪度：基于 planForm 当前内容 + 已挂载/待挂载素材数量计算。
+ * 随编辑实时刷新，引导教师补齐缺失维度。
+ */
+const planEditorReadiness = computed(() =>
+  computePlanReadiness({
+    objectives: planForm.objectives,
+    keyPoints: planForm.keyPoints,
+    preparation: planForm.preparation,
+    process: planForm.process,
+    durationMinutes: planForm.durationMinutes,
+    resourceCount: allPlanResources.value.length
+  })
+)
+
+/**
+ * 教案卡片的就绪度（不含资源项：列表未附带 resources，避免误判）。
+ * 用于卡片展示就绪徽章。
+ */
+function cardReadiness(plan: LessonPlan) {
+  return computePlanReadiness({
+    objectives: plan.objectives,
+    keyPoints: plan.keyPoints,
+    preparation: plan.preparation,
+    process: plan.process,
+    durationMinutes: plan.durationMinutes
+  })
+}
 
 const planIdeaOptions = computed(() =>
   ideas.value.map((i) => ({ value: i.id, label: i.title }))
@@ -3295,6 +3360,54 @@ onUnmounted(() => {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: inherit;
+}
+
+/* 备课就绪度清单（G15） */
+.plan-readiness-panel {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  border-radius: 6px;
+}
+.plan-readiness-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.plan-readiness-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #135200;
+  white-space: nowrap;
+}
+.plan-readiness-count {
+  font-size: 12px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+.plan-readiness-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.plan-readiness-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 10px;
+  cursor: default;
+}
+.plan-readiness-item.is-passed {
+  color: #389e0d;
+  background: #d9f7be;
+}
+.plan-readiness-item.is-missing {
+  color: #874d00;
+  background: #fff7e6;
 }
 
 /* 教案模板库 */

@@ -226,6 +226,14 @@
                   color="green"
                   size="small"
                 >{{ sec }}</a-tag>
+                <a-tooltip
+                  v-if="prepPlanReadiness"
+                  :title="`${prepPlanReadiness.passedCount}/${prepPlanReadiness.totalCount} 项就绪：${prepPlanReadiness.items.map((i) => (i.passed ? '✓' : '✗') + i.label).join(' · ')}`"
+                >
+                  <a-tag :color="readinessLevelColor(prepPlanReadiness.level)" size="small">
+                    {{ readinessLevelText(prepPlanReadiness.level) }} {{ prepPlanReadiness.pct }}%
+                  </a-tag>
+                </a-tooltip>
               </div>
               <a-collapse
                 v-if="prepPlanHasContent"
@@ -560,6 +568,11 @@ import type {
   VersionMeta,
   DocLinkWithLesson
 } from '@shared/types'
+import {
+  computePlanReadiness,
+  readinessLevelText,
+  readinessLevelColor
+} from '@shared/plan-readiness'
 import dayjs from 'dayjs'
 
 // ============ 可视化计时器子组件（同文件内定义） ============
@@ -1142,6 +1155,23 @@ const prepPlanHasContent = computed<boolean>(() => {
   const p = prepPlan.value
   if (!p) return false
   return !!(p.objectives || p.keyPoints || p.preparation || p.process || p.reflection)
+})
+
+/**
+ * 授课上下文就绪度摘要（G15）：含关联素材数，授课前一眼判断备课是否充分。
+ * 缺项以 tooltip 形式提示，引导课前补齐。
+ */
+const prepPlanReadiness = computed(() => {
+  const p = prepPlan.value
+  if (!p) return null
+  return computePlanReadiness({
+    objectives: p.objectives,
+    keyPoints: p.keyPoints,
+    preparation: p.preparation,
+    process: p.process,
+    durationMinutes: p.durationMinutes,
+    resourceCount: prepPlanResources.value.length
+  })
 })
 
 /** 课后反思 Modal 的上下文描述 */
