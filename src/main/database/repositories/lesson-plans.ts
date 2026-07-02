@@ -20,6 +20,7 @@ interface LessonPlanRow {
   process: string | null
   reflection: string | null
   duration_minutes: number | null
+  parent_plan_id: string | null
   created_at: string
   updated_at: string
 }
@@ -31,6 +32,8 @@ interface JoinedRow extends LessonPlanRow {
   lesson_count?: number
   used_classes?: string | null
   used_subjects?: string | null
+  parent_plan_title?: string | null
+  derived_count?: number
 }
 
 function mapRow(r: JoinedRow): LessonPlan {
@@ -47,11 +50,14 @@ function mapRow(r: JoinedRow): LessonPlan {
     process: r.process,
     reflection: r.reflection,
     durationMinutes: r.duration_minutes,
+    parentPlanId: r.parent_plan_id,
+    parentPlanTitle: r.parent_plan_title ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     lessonCount: r.lesson_count ?? 0,
     usedClasses: r.used_classes ? r.used_classes.split('\n').filter(Boolean) : [],
-    usedSubjects: r.used_subjects ? r.used_subjects.split('\n').filter(Boolean) : []
+    usedSubjects: r.used_subjects ? r.used_subjects.split('\n').filter(Boolean) : [],
+    derivedCount: r.derived_count ?? 0
   }
 }
 
@@ -75,10 +81,13 @@ export function list(q?: {
                 JOIN classes c ON c.id = l.class_id
                 WHERE l.idea_version_id = lp.idea_version_id) AS used_classes,
                (SELECT GROUP_CONCAT(DISTINCT l.subject, char(10)) FROM lessons l
-                WHERE l.idea_version_id = lp.idea_version_id AND l.subject IS NOT NULL) AS used_subjects
+                WHERE l.idea_version_id = lp.idea_version_id AND l.subject IS NOT NULL) AS used_subjects,
+               (SELECT COUNT(*) FROM lesson_plans child WHERE child.parent_plan_id = lp.id) AS derived_count,
+               pp.title AS parent_plan_title
              FROM lesson_plans lp
              JOIN idea_versions iv ON iv.id = lp.idea_version_id
-             JOIN ideas i ON i.id = iv.idea_id`
+             JOIN ideas i ON i.id = iv.idea_id
+             LEFT JOIN lesson_plans pp ON pp.id = lp.parent_plan_id`
   const where: string[] = []
   const params: unknown[] = []
   if (q?.ideaId) {
@@ -158,6 +167,9 @@ export function clonePlan(sourcePlanId: string, input: LessonPlanCloneInput): Le
     durationMinutes: source.durationMinutes
   })
 
+  // 记录克隆血统：parent_plan_id 指向源教案，便于追溯派生关系
+  db().prepare(`UPDATE lesson_plans SET parent_plan_id = ? WHERE id = ?`).run(sourcePlanId, cloned.id)
+
   // 一并复制结构化素材关联：派生教案通常需要相同的素材
   const sourceResources = listResources(sourcePlanId)
   for (const pr of sourceResources) {
@@ -169,16 +181,18 @@ export function clonePlan(sourcePlanId: string, input: LessonPlanCloneInput): Le
       .run(uuid(), cloned.id, pr.resourceId, pr.section, pr.sortOrder, pr.note)
   }
 
-  return cloned
+  return get(cloned.id)!
 }
 
 export function get(id: string): LessonPlan | null {
   const row = db()
     .prepare(
-      `SELECT lp.*, iv.version_name, i.title AS idea_title, i.id AS idea_id
+      `SELECT lp.*, iv.version_name, i.title AS idea_title, i.id AS idea_id,
+              pp.title AS parent_plan_title
        FROM lesson_plans lp
        JOIN idea_versions iv ON iv.id = lp.idea_version_id
        JOIN ideas i ON i.id = iv.idea_id
+       LEFT JOIN lesson_plans pp ON pp.id = lp.parent_plan_id
        WHERE lp.id = ?`
     )
     .get(id) as JoinedRow | undefined
@@ -189,10 +203,12 @@ export function get(id: string): LessonPlan | null {
 export function getByVersion(versionId: string): LessonPlan | null {
   const row = db()
     .prepare(
-      `SELECT lp.*, iv.version_name, i.title AS idea_title, i.id AS idea_id
+      `SELECT lp.*, iv.version_name, i.title AS idea_title, i.id AS idea_id,
+              pp.title AS parent_plan_title
        FROM lesson_plans lp
        JOIN idea_versions iv ON iv.id = lp.idea_version_id
        JOIN ideas i ON i.id = iv.idea_id
+       LEFT JOIN lesson_plans pp ON pp.id = lp.parent_plan_id
        WHERE lp.idea_version_id = ?`
     )
     .get(versionId) as JoinedRow | undefined
@@ -373,5 +389,16 @@ export function countPlanUsageOfResource(resourceId: string): number {
   const row = db()
     .prepare(`SELECT COUNT(*) AS n FROM plan_resources WHERE resource_id = ?`)
     .get(resourceId) as { n: number }
+  return row?.n ?? 0
+}
+
+/**
+ * 统计某教案的派生数量（被克隆了多少份）。
+ * 用于源教案卡片展示「已派生 N 份」徽章，体现教案的复用价值。
+ */
+export function countDerivedPlans(planId: string): number {
+  const row = db()
+    .prepare(`SELECT COUNT(*) AS n FROM lesson_plans WHERE parent_plan_id = ?`)
+    .get(planId) as { n: number }
   return row?.n ?? 0
 }

@@ -26,6 +26,8 @@ export function initDatabase(dbPath: string): DB {
   // （CREATE TABLE IF NOT EXISTS 不会为已建表追加列，需 ALTER TABLE）
   migrateLessonsReflection(db)
   migrateLessonsAchievement(db)
+  // 幂等迁移：为 lesson_plans 表补充 parent_plan_id 列（教案克隆血统追踪）
+  migrateLessonPlansParent(db)
 
   // 先暴露实例，种子数据初始化内部需要通过 db() 取实例
   dbInstance = db
@@ -89,6 +91,19 @@ function migrateLessonsAchievement(db: DB): void {
   }
   if (!names.has('assessment_at')) {
     db.exec(`ALTER TABLE lessons ADD COLUMN assessment_at DATETIME`)
+  }
+}
+
+/**
+ * 幂等迁移：为 lesson_plans 表追加 parent_plan_id 列（教案克隆血统追踪）。
+ * clonePlan 创建派生教案时写入源教案 ID，便于追溯派生关系。
+ * 源教案被删除时 ON DELETE SET NULL，保留派生教案但断开血统链。
+ */
+function migrateLessonPlansParent(db: DB): void {
+  const cols = db.prepare(`PRAGMA table_info(lesson_plans)`).all() as Array<{ name: string }>
+  const names = new Set(cols.map((c) => c.name))
+  if (!names.has('parent_plan_id')) {
+    db.exec(`ALTER TABLE lesson_plans ADD COLUMN parent_plan_id TEXT`)
   }
 }
 

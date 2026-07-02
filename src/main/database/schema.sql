@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS idea_versions (
 CREATE INDEX IF NOT EXISTS idx_idea_versions_idea ON idea_versions(idea_id);
 
 -- 教案（与点子版本 1:1 关联，结构化备课内容）
+-- parent_plan_id 记录克隆血统：由 clonePlan 创建时指向源教案，便于追溯派生关系
 CREATE TABLE IF NOT EXISTS lesson_plans (
   id TEXT PRIMARY KEY,
   idea_version_id TEXT NOT NULL UNIQUE,
@@ -73,10 +74,13 @@ CREATE TABLE IF NOT EXISTS lesson_plans (
   process TEXT,
   reflection TEXT,
   duration_minutes INTEGER,
+  parent_plan_id TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (idea_version_id) REFERENCES idea_versions(id) ON DELETE CASCADE
+  FOREIGN KEY (idea_version_id) REFERENCES idea_versions(id) ON DELETE CASCADE,
+  FOREIGN KEY (parent_plan_id) REFERENCES lesson_plans(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS idx_lesson_plans_parent ON lesson_plans(parent_plan_id);
 
 -- 课次
 -- reflection / reflected_at 为 per-lesson 课后反思存储：

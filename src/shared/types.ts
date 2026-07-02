@@ -128,6 +128,12 @@ export interface LessonPlan {
   usedSubjects?: string[]
   /** 关联的结构化素材列表（get/getByVersion 时按需附带，list 不附带） */
   resources?: PlanResource[]
+  /** 克隆血统：由 clonePlan 创建时指向源教案 ID，便于追溯派生关系 */
+  parentPlanId?: string | null
+  /** 源教案标题（list/get 时 JOIN 派生，便于前端直接展示「派生自 X」徽章） */
+  parentPlanTitle?: string | null
+  /** 派生教案数量（list 时聚合，体现教案复用价值） */
+  derivedCount?: number
 }
 /**
  * 教案关联的结构化素材（plan_resources 表）。

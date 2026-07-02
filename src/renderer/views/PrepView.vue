@@ -242,6 +242,18 @@
                     <a-tag v-if="item.durationMinutes" color="orange">
                       <ScheduleOutlined /> {{ item.durationMinutes }} 分钟
                     </a-tag>
+                    <a-tooltip v-if="item.parentPlanTitle" title="点击查看源教案">
+                      <a-tag
+                        color="cyan"
+                        style="cursor: pointer"
+                        @click="openPlanForVersionById(item.parentPlanId!)"
+                      >
+                        <BranchesOutlined /> 派生自：{{ item.parentPlanTitle }}
+                      </a-tag>
+                    </a-tooltip>
+                    <a-tag v-if="item.derivedCount && item.derivedCount > 0" color="geekblue">
+                      <ForkOutlined /> 已派生 {{ item.derivedCount }} 份
+                    </a-tag>
                   </a-space>
                 </div>
               </template>
@@ -1235,7 +1247,9 @@ import {
   SnippetsOutlined,
   BankOutlined,
   TagOutlined,
-  CloseOutlined
+  CloseOutlined,
+  BranchesOutlined,
+  ForkOutlined
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
@@ -1952,6 +1966,23 @@ async function openPlanForVersion(versionId: string): Promise<void> {
     }
   } catch (e) {
     message.error(`加载教案失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
+/**
+ * 按教案 ID 打开编辑器（G14 血统树：从「派生自」徽章跳转到源教案）。
+ * 通过 lessonPlan.get 取到 ideaVersionId 后复用 openPlanForVersion 流程。
+ */
+async function openPlanForVersionById(planId: string): Promise<void> {
+  try {
+    const plan = await call(window.api.lessonPlan.get(planId))
+    if (!plan) {
+      message.warning('源教案已不存在（可能已被删除）')
+      return
+    }
+    await openPlanForVersion(plan.ideaVersionId)
+  } catch (e) {
+    message.error(`加载源教案失败：${String(e instanceof Error ? e.message : e)}`)
   }
 }
 
