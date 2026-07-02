@@ -76,6 +76,7 @@ export function list(q?: {
   keyword?: string
   classId?: string
   subject?: string
+  knowledgePoint?: string
 }): LessonPlan[] {
   let sql = `SELECT lp.*, iv.version_name, i.title AS idea_title, i.id AS idea_id,
                (SELECT COUNT(*) FROM lessons l WHERE l.idea_version_id = lp.idea_version_id) AS lesson_count,
@@ -122,7 +123,14 @@ export function list(q?: {
   }
   if (where.length > 0) sql += ` WHERE ` + where.join(' AND ')
   sql += ` ORDER BY lp.updated_at DESC`
-  return (db().prepare(sql).all(...params) as JoinedRow[]).map(mapRow)
+  const rows = (db().prepare(sql).all(...params) as JoinedRow[]).map(mapRow)
+  // G24: 按知识点过滤。knowledge_points 为 JSON 数组，TS 解析后精确匹配，
+  // 避免 SQL LIKE 子串误匹配（如「循环」误匹配「嵌套循环」）。
+  if (q?.knowledgePoint && q.knowledgePoint.trim()) {
+    const kp = q.knowledgePoint.trim()
+    return rows.filter((r) => r.knowledgePoints?.some((p) => p.trim() === kp))
+  }
+  return rows
 }
 
 /**

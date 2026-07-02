@@ -136,6 +136,15 @@
               :options="planSubjectOptions"
               @change="loadPlans"
             />
+            <a-select
+              v-model:value="planFilterKnowledgePoint"
+              placeholder="按知识点筛选"
+              style="width: 180px"
+              allow-clear
+              show-search
+              :options="planKnowledgePointOptions"
+              @change="loadPlans"
+            />
             <a-button @click="loadPlans"><ReloadOutlined /> 刷新</a-button>
             <a-button @click="openTemplateGallery"><CopyOutlined /> 从模板新建</a-button>
             <a-button type="primary" @click="openNewPlanModal"><PlusOutlined /> 新建教案</a-button>
@@ -497,6 +506,14 @@
                 <span v-else class="gap-elsewhere text-muted">
                   （已排课但未结课）
                 </span>
+                <a-button
+                  type="link"
+                  size="small"
+                  class="gap-find-btn"
+                  @click="filterPlansByKnowledgePoint(grp.point)"
+                >
+                  查找教案
+                </a-button>
               </div>
               <div v-if="gapsHiddenPointCount > 0" class="gap-more text-muted">
                 还有 {{ gapsHiddenPointCount }} 个知识点的缺口未展示，见下方表格
@@ -1698,9 +1715,10 @@ async function removeVersion(versionId: string): Promise<void> {
 const plans = ref<LessonPlan[]>([])
 const plansLoading = ref(false)
 const planKeyword = ref('')
-// 历史教案按班级/科目检索（G12）
+// 历史教案按班级/科目检索（G12）；G24 增加按知识点检索
 const planFilterClassId = ref<string | undefined>(undefined)
 const planFilterSubject = ref<string | undefined>(undefined)
+const planFilterKnowledgePoint = ref<string | undefined>(undefined)
 const planClassOptions = ref<Array<{ label: string; value: string }>>([])
 const planSubjectOptions = ref<Array<{ label: string; value: string }>>([])
 // 备课进度看板（G6-4）
@@ -1930,17 +1948,36 @@ const planVersionOptions = computed(() => {
 async function loadPlans(): Promise<void> {
   plansLoading.value = true
   try {
-    const q: { keyword?: string; classId?: string; subject?: string } = {}
+    const q: { keyword?: string; classId?: string; subject?: string; knowledgePoint?: string } = {}
     const kw = planKeyword.value.trim()
     if (kw) q.keyword = kw
     if (planFilterClassId.value) q.classId = planFilterClassId.value
     if (planFilterSubject.value) q.subject = planFilterSubject.value
+    if (planFilterKnowledgePoint.value) q.knowledgePoint = planFilterKnowledgePoint.value
     plans.value = await call(window.api.lessonPlan.list(Object.keys(q).length ? q : undefined))
   } catch (e) {
     message.error(`加载教案失败：${String(e instanceof Error ? e.message : e)}`)
   } finally {
     plansLoading.value = false
   }
+}
+
+/**
+ * G24: 知识点筛选下拉选项。复用 G22 覆盖度数据（onMounted 已加载），
+ * 覆盖度 points 即所有被打过标签的知识点集合。
+ */
+const planKnowledgePointOptions = computed(() =>
+  knowledgeCoverage.value.points.map((p) => ({ label: p.point, value: p.point }))
+)
+
+/**
+ * G24: 从缺口提醒跳转到教案列表并按知识点筛选。
+ * 闭环：缺口 → 查找该知识点的现有教案 → 克隆/适配给缺失班级。
+ */
+function filterPlansByKnowledgePoint(point: string): void {
+  activeTab.value = 'plans'
+  planFilterKnowledgePoint.value = point
+  loadPlans()
 }
 
 /**
@@ -3775,6 +3812,13 @@ onUnmounted(() => {
 .coverage-gaps .gap-more {
   margin-top: 2px;
   font-size: 11px;
+}
+.coverage-gaps .gap-find-btn {
+  margin-left: 4px;
+  padding: 0;
+  height: auto;
+  line-height: 1.5;
+  font-size: 12px;
 }
 .plan-usage {
   display: flex;

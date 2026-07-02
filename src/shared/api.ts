@@ -125,6 +125,7 @@ export interface WorkbenchAPI {
       keyword?: string
       classId?: ID
       subject?: string
+      knowledgePoint?: string
     }) => Promise<Result<LessonPlan[]>>
     get: (id: ID) => Promise<Result<LessonPlan>>
     getByVersion: (versionId: ID) => Promise<Result<LessonPlan | null>>
