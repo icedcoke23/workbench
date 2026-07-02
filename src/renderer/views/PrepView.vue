@@ -244,6 +244,11 @@
                       <DownloadOutlined />
                     </a-button>
                   </a-tooltip>
+                  <a-tooltip title="导出为 PDF 文件">
+                    <a-button size="small" :loading="exportingId === item.id" @click="exportPlanPdf(item)">
+                      <FilePdfOutlined />
+                    </a-button>
+                  </a-tooltip>
                   <a-popconfirm title="确认删除该教案？作品版本不受影响。" @confirm="removePlan(item.id)">
                     <a-button size="small" danger><DeleteOutlined /></a-button>
                   </a-popconfirm>
@@ -1081,7 +1086,8 @@ import {
   CopyOutlined,
   CalendarOutlined,
   LeftOutlined,
-  RightOutlined
+  RightOutlined,
+  FilePdfOutlined
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
@@ -1840,6 +1846,23 @@ async function exportPlan(plan: LessonPlan): Promise<void> {
     }
   } catch (e) {
     message.error(`导出失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    exportingId.value = null
+  }
+}
+
+/** 导出指定教案为 PDF 文件（主进程渲染 HTML 后 printToPDF，弹出保存对话框） */
+async function exportPlanPdf(plan: LessonPlan): Promise<void> {
+  exportingId.value = plan.id
+  try {
+    const savedPath = await call(window.api.lessonPlan.exportPdf(plan.id))
+    if (savedPath) {
+      message.success(`已导出 PDF 到：${savedPath}`)
+    } else {
+      message.info('已取消导出')
+    }
+  } catch (e) {
+    message.error(`导出 PDF 失败：${String(e instanceof Error ? e.message : e)}`)
   } finally {
     exportingId.value = null
   }

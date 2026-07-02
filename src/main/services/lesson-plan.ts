@@ -6,6 +6,7 @@ import {
   getLessonPlanReviewSystemPrompt
 } from '../lib/prompts'
 import * as scratchService from './scratch'
+import * as pdfService from './pdf'
 import * as ideaRepo from '../database/repositories/ideas'
 import * as lessonPlanRepo from '../database/repositories/lesson-plans'
 import * as lessonRepo from '../database/repositories/lessons'
@@ -157,6 +158,141 @@ export async function exportMarkdown(planId: string): Promise<string | null> {
   })
   if (res.canceled || !res.filePath) return null
   writeFileSync(res.filePath, md, 'utf8')
+  return res.filePath
+}
+
+/**
+ * 将教案 Markdown 子集（# / ## / ### 标题、- 列表、**粗体**、> 引用、空行分段）
+ * 转换为 HTML 片段。转义优先，避免注入。
+ */
+function renderMdSubsetToHtml(md: string): string {
+  const escaped = md
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  // 按空行切分为块，逐块转换
+  const blocks = escaped.split(/\n{2,}/)
+  const htmlBlocks: string[] = []
+  let listBuf: string[] = []
+  const flushList = (): void => {
+    if (listBuf.length > 0) {
+      htmlBlocks.push(`<ul>${listBuf.join('')}</ul>`)
+      listBuf = []
+    }
+  }
+  for (const raw of blocks) {
+    const block = raw.trim()
+    if (block === '') continue
+    // 引用块
+    if (block.startsWith('&gt;')) {
+      flushList()
+      const inner = block.replace(/^&gt;\s?/gm, '').replace(/\n/g, '<br>')
+      htmlBlocks.push(`<blockquote>${inner}</blockquote>`)
+      continue
+    }
+    // 标题
+    const h3 = block.match(/^###\s+(.+)$/)
+    if (h3 && !block.includes('\n')) {
+      flushList()
+      htmlBlocks.push(`<h3>${h3[1]}</h3>`)
+      continue
+    }
+    const h2 = block.match(/^##\s+(.+)$/)
+    if (h2 && !block.includes('\n')) {
+      flushList()
+      htmlBlocks.push(`<h2>${h2[1]}</h2>`)
+      continue
+    }
+    const h1 = block.match(/^#\s+(.+)$/)
+    if (h1 && !block.includes('\n')) {
+      flushList()
+      htmlBlocks.push(`<h1>${h1[1]}</h1>`)
+      continue
+    }
+    // 列表块（可能多行 - 项）
+    if (/^- /.test(block)) {
+      const items = block
+        .split('\n')
+        .filter((l) => l.startsWith('- '))
+        .map((l) => `<li>${l.slice(2)}</li>`)
+      listBuf.push(...items)
+      continue
+    }
+    // 普通段落
+    flushList()
+    const para = block
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n/g, '<br>')
+    htmlBlocks.push(`<p>${para}</p>`)
+  }
+  flushList()
+  return htmlBlocks.join('\n')
+}
+
+/** 将教案渲染为带样式的完整 HTML，供 printToPDF 使用 */
+function buildLessonPlanHtml(plan: LessonPlan): string {
+  const title = plan.title || (plan.versionName ? `${plan.versionName} 教案` : '未命名教案')
+  const metaParts: string[] = []
+  if (plan.ideaTitle) metaParts.push(`点子：${plan.ideaTitle}`)
+  if (plan.versionName) metaParts.push(`版本：${plan.versionName}`)
+  if (plan.durationMinutes) metaParts.push(`预计时长：${plan.durationMinutes} 分钟`)
+  metaParts.push(`创建：${plan.createdAt.slice(0, 16).replace('T', ' ')}`)
+  metaParts.push(`更新：${plan.updatedAt.slice(0, 16).replace('T', ' ')}`)
+
+  const section = (heading: string, content: string | null | undefined): string => {
+    const body = content && content.trim() ? renderMdSubsetToHtml(content.trim()) : '<p class="empty">（未填写）</p>'
+    return `<h2>${heading}</h2>\n${body}`
+  }
+
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+    @page { size: A4; margin: 18mm; }
+    body { font-family: "Microsoft YaHei","PingFang SC","Helvetica Neue",sans-serif; color:#222; line-height:1.8; font-size:14px; }
+    h1 { color:#4f46e5; font-size:24px; text-align:center; margin:0 0 8px; }
+    .meta { text-align:center; color:#6b7280; font-size:12px; margin-bottom:24px; }
+    h2 { color:#4f46e5; font-size:17px; border-left:5px solid #4f46e5; padding-left:10px; margin-top:22px; }
+    h3 { color:#374151; font-size:15px; margin:14px 0 4px; }
+    p { margin:6px 0; }
+    ul { margin:6px 0; padding-left:22px; }
+    li { margin:3px 0; }
+    blockquote { margin:8px 0; padding:8px 12px; background:#f6f8fa; border-left:3px solid #d1d5db; color:#4b5563; }
+    .empty { color:#9ca3af; font-style:italic; }
+    strong { color:#111827; }
+  </style></head><body>
+    <h1>${title}</h1>
+    <div class="meta">${metaParts.join(' · ')}</div>
+    ${section('教学目标', plan.objectives)}
+    ${section('教学重难点', plan.keyPoints)}
+    ${section('教学准备', plan.preparation)}
+    ${section('教学过程', plan.process)}
+    ${section('课后反思', plan.reflection)}
+  </body></html>`
+}
+
+/**
+ * 将指定教案导出为 PDF 文件，弹出保存对话框让用户选择位置。
+ * @returns 保存路径；用户取消返回 null
+ */
+export async function exportPdf(planId: string): Promise<string | null> {
+  const plan = lessonPlanRepo.get(planId)
+  if (!plan) throw new Error('教案不存在')
+
+  const title = plan.title || (plan.versionName ? `${plan.versionName} 教案` : '未命名教案')
+  const safeName = title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)
+  const fileName = `${safeName}.pdf`
+
+  const res = await dialog.showSaveDialog({
+    title: '导出教案为 PDF',
+    defaultPath: join(app.getPath('documents'), fileName),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }]
+  })
+  if (res.canceled || !res.filePath) return null
+
+  const html = buildLessonPlanHtml(plan)
+  const outDir = join(app.getPath('userData'), 'exports')
+  const tmpPdf = await pdfService.renderHtmlToPdf(html, outDir, `教案-${safeName}`)
+  // renderHtmlToPdf 自带时间戳后缀；复制到用户选择的目标路径
+  const { copyFile } = await import('fs/promises')
+  await copyFile(tmpPdf, res.filePath)
   return res.filePath
 }
 

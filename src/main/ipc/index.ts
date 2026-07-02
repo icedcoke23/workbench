@@ -96,6 +96,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('lessonPlan:exportMarkdown', (_e, id) =>
     tryRunAsync(() => lessonPlanService.exportMarkdown(id))
   )
+  ipcMain.handle('lessonPlan:exportPdf', (_e, id) =>
+    tryRunAsync(() => lessonPlanService.exportPdf(id))
+  )
   ipcMain.handle('lessonPlan:prepOverview', () =>
     tryRun(() => lessonPlanService.buildPrepOverview())
   )
