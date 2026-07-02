@@ -12,11 +12,19 @@ import * as pdfService from './pdf'
 import * as ideaRepo from '../database/repositories/ideas'
 import * as lessonPlanRepo from '../database/repositories/lesson-plans'
 import * as lessonRepo from '../database/repositories/lessons'
+import * as docRepo from '../database/repositories/docs'
 import { db } from '../database/db'
 import { app, dialog } from 'electron'
 import { writeFileSync } from 'fs'
 import { join } from 'path'
-import type { LessonPlan, PlanResource, PrepOverview, PrepOverviewLesson, PrepStage } from '@shared/types'
+import type {
+  LessonPlan,
+  PlanDocLink,
+  PlanResource,
+  PrepOverview,
+  PrepOverviewLesson,
+  PrepStage
+} from '@shared/types'
 import { computePlanReadiness } from '@shared/plan-readiness'
 
 /**
@@ -207,8 +215,25 @@ function renderResourcesMd(resources: PlanResource[]): string {
   return `\n\n### 关联素材清单\n\n${lines.join('\n')}\n`
 }
 
+/**
+ * 将教案级关联文档渲染为 Markdown 列表（追加到教学准备章节末尾，素材清单之后）。
+ * G18: 导出 Markdown/PDF 时包含外部文档（语雀/PPT/工作表等），便于跨课次复用。
+ */
+function renderDocsMd(docs: PlanDocLink[]): string {
+  if (!docs.length) return ''
+  const lines = docs.map((d) => {
+    const title = d.title?.trim() || d.url
+    return `- [${title}](${d.url})`
+  })
+  return `\n\n### 关联文档清单\n\n${lines.join('\n')}\n`
+}
+
 /** 将教案内容渲染为 Markdown 字符串 */
-function buildLessonPlanMarkdown(plan: LessonPlan, resources?: PlanResource[]): string {
+function buildLessonPlanMarkdown(
+  plan: LessonPlan,
+  resources?: PlanResource[],
+  docs?: PlanDocLink[]
+): string {
   const title = plan.title || (plan.versionName ? `${plan.versionName} 教案` : '未命名教案')
   const metaParts: string[] = []
   if (plan.ideaTitle) metaParts.push(`点子：${plan.ideaTitle}`)
@@ -221,8 +246,11 @@ function buildLessonPlanMarkdown(plan: LessonPlan, resources?: PlanResource[]): 
     return `## ${heading}\n\n${content && content.trim() ? content.trim() : '（未填写）'}\n`
   }
 
-  // 教学准备章节末尾追加结构化素材清单（若有）
-  const prepContent = (plan.preparation ?? '') + (resources && resources.length ? renderResourcesMd(resources) : '')
+  // 教学准备章节末尾追加结构化素材清单（若有），其后追加教案级关联文档清单（G18）
+  const prepContent =
+    (plan.preparation ?? '') +
+    (resources && resources.length ? renderResourcesMd(resources) : '') +
+    (docs && docs.length ? renderDocsMd(docs) : '')
 
   return `# ${title}
 
@@ -245,7 +273,8 @@ export async function exportMarkdown(planId: string): Promise<string | null> {
   if (!plan) throw new Error('教案不存在')
 
   const resources = lessonPlanRepo.listResources(planId)
-  const md = buildLessonPlanMarkdown(plan, resources)
+  const docs = docRepo.listByPlan(planId)
+  const md = buildLessonPlanMarkdown(plan, resources, docs)
   const title = plan.title || (plan.versionName ? `${plan.versionName} 教案` : '未命名教案')
   // 文件名安全化：去除 Windows/Mac 不允许的字符
   const safeName = title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)
@@ -262,7 +291,7 @@ export async function exportMarkdown(planId: string): Promise<string | null> {
 }
 
 /**
- * 将教案 Markdown 子集（# / ## / ### 标题、- 列表、**粗体**、> 引用、空行分段）
+ * 将教案 Markdown 子集（# / ## / ### 标题、- 列表、**粗体**、> 引用、`[text](url)` 链接、空行分段）
  * 转换为 HTML 片段。转义优先，避免注入。
  */
 function renderMdSubsetToHtml(md: string): string {
@@ -270,6 +299,12 @@ function renderMdSubsetToHtml(md: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+  // 将 Markdown 链接 [text](url) 转为 <a> 标签（G18：关联文档清单需要可点击链接）
+  const convertLinks = (s: string): string =>
+    s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, url: string) => {
+      const safeUrl = url.replace(/"/g, '&quot;')
+      return `<a href="${safeUrl}">${label}</a>`
+    })
   // 按空行切分为块，逐块转换
   const blocks = escaped.split(/\n{2,}/)
   const htmlBlocks: string[] = []
@@ -314,13 +349,13 @@ function renderMdSubsetToHtml(md: string): string {
       const items = block
         .split('\n')
         .filter((l) => l.startsWith('- '))
-        .map((l) => `<li>${l.slice(2)}</li>`)
+        .map((l) => `<li>${convertLinks(l.slice(2))}</li>`)
       listBuf.push(...items)
       continue
     }
     // 普通段落
     flushList()
-    const para = block
+    const para = convertLinks(block)
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\n/g, '<br>')
     htmlBlocks.push(`<p>${para}</p>`)
@@ -330,7 +365,11 @@ function renderMdSubsetToHtml(md: string): string {
 }
 
 /** 将教案渲染为带样式的完整 HTML，供 printToPDF 使用 */
-function buildLessonPlanHtml(plan: LessonPlan, resources?: PlanResource[]): string {
+function buildLessonPlanHtml(
+  plan: LessonPlan,
+  resources?: PlanResource[],
+  docs?: PlanDocLink[]
+): string {
   const title = plan.title || (plan.versionName ? `${plan.versionName} 教案` : '未命名教案')
   const metaParts: string[] = []
   if (plan.ideaTitle) metaParts.push(`点子：${plan.ideaTitle}`)
@@ -344,8 +383,11 @@ function buildLessonPlanHtml(plan: LessonPlan, resources?: PlanResource[]): stri
     return `<h2>${heading}</h2>\n${body}`
   }
 
-  // 教学准备章节末尾追加结构化素材清单（若有）
-  const prepContent = (plan.preparation ?? '') + (resources && resources.length ? '\n\n' + renderResourcesMd(resources) : '')
+  // 教学准备章节末尾追加结构化素材清单（若有），其后追加教案级关联文档清单（G18）
+  const prepContent =
+    (plan.preparation ?? '') +
+    (resources && resources.length ? renderResourcesMd(resources) : '') +
+    (docs && docs.length ? renderDocsMd(docs) : '')
 
   return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
     @page { size: A4; margin: 18mm; }
@@ -357,6 +399,7 @@ function buildLessonPlanHtml(plan: LessonPlan, resources?: PlanResource[]): stri
     p { margin:6px 0; }
     ul { margin:6px 0; padding-left:22px; }
     li { margin:3px 0; }
+    a { color:#4f46e5; text-decoration:none; word-break:break-all; }
     blockquote { margin:8px 0; padding:8px 12px; background:#f6f8fa; border-left:3px solid #d1d5db; color:#4b5563; }
     .empty { color:#9ca3af; font-style:italic; }
     strong { color:#111827; }
@@ -390,7 +433,7 @@ export async function exportPdf(planId: string): Promise<string | null> {
   })
   if (res.canceled || !res.filePath) return null
 
-  const html = buildLessonPlanHtml(plan, lessonPlanRepo.listResources(planId))
+  const html = buildLessonPlanHtml(plan, lessonPlanRepo.listResources(planId), docRepo.listByPlan(planId))
   const outDir = join(app.getPath('userData'), 'exports')
   const tmpPdf = await pdfService.renderHtmlToPdf(html, outDir, `教案-${safeName}`)
   // renderHtmlToPdf 自带时间戳后缀；复制到用户选择的目标路径
