@@ -262,6 +262,32 @@ export interface PrepReadinessSnapshot {
   readinessPct: number
   createdAt: string
 }
+
+/**
+ * 知识点覆盖度（G22）：某知识点被多少份教案标注、被多少班级的课次覆盖。
+ * 用于跨班级课程进度追踪，发现哪些知识点尚未在某个班级讲授。
+ */
+export interface KnowledgeCoveragePoint {
+  /** 知识点名称 */
+  point: string
+  /** 标注该知识点的教案数 */
+  planCount: number
+  /** 覆盖该知识点的班级数（有过关联课次） */
+  classCount: number
+  /** 覆盖明细：每个班级的课次数与最近授课时间 */
+  classes: Array<{
+    classId: ID
+    className: string
+    lessonCount: number
+    /** 最近一次授课时间（已结课优先，否则取最近排课），ISO 字符串；无课次为 null */
+    lastTaughtAt: string | null
+  }>
+}
+export interface KnowledgeCoverage {
+  points: KnowledgeCoveragePoint[]
+  totalPoints: number
+  totalClasses: number
+}
 export interface LessonInput {
   classId: ID
   startTime: string

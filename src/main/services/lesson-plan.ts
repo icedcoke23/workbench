@@ -13,12 +13,14 @@ import * as ideaRepo from '../database/repositories/ideas'
 import * as lessonPlanRepo from '../database/repositories/lesson-plans'
 import * as lessonRepo from '../database/repositories/lessons'
 import * as docRepo from '../database/repositories/docs'
-import { db, uuid } from '../database/db'
+import { db, uuid, parseJSON } from '../database/db'
 import { app, dialog } from 'electron'
 import { writeFileSync } from 'fs'
 import { join } from 'path'
 import type {
   LessonPlan,
+  KnowledgeCoverage,
+  KnowledgeCoveragePoint,
   PlanDocLink,
   PlanResource,
   PrepOverview,
@@ -665,4 +667,116 @@ export function listReadinessTrend(days: number = READINESS_TREND_DAYS): PrepRea
     )
     .all(sinceDate) as SnapshotRow[]
   return rows.map(mapSnapshotRow)
+}
+
+/**
+ * 构建知识点覆盖度看板数据（G22）。
+ *
+ * 拉取全部带知识点标签的教案，LEFT JOIN 其关联版本的课次与班级，
+ * 在 TS 中按知识点聚合：每个知识点的教案数、覆盖班级数、每班级课次数与最近授课时间。
+ *
+ * 「覆盖」定义：某班级存在一节关联了「标注该知识点的教案所属版本」的课次
+ * （无论已上课/待上课），即视为该班级覆盖了该知识点。
+ *
+ * 纯 SQL 不使用 json_each（避免对 JSON1 扩展的依赖），knowledge_points 在 TS 解析，
+ * 与 G16 就绪度计算的「规则单一来源在 TS」模式一致。个人工作台数据量小，无性能压力。
+ */
+export function buildKnowledgeCoverage(): KnowledgeCoverage {
+  const rows = db()
+    .prepare(
+      `SELECT lp.id AS plan_id, lp.knowledge_points,
+              l.id AS lesson_id, l.class_id, c.name AS class_name,
+              l.start_time, l.status
+       FROM lesson_plans lp
+       LEFT JOIN lessons l ON l.idea_version_id = lp.idea_version_id
+       LEFT JOIN classes c ON c.id = l.class_id
+       WHERE lp.knowledge_points IS NOT NULL AND lp.knowledge_points != '[]'`
+    )
+    .all() as Array<{
+    plan_id: string
+    knowledge_points: string
+    lesson_id: string | null
+    class_id: string | null
+    class_name: string | null
+    start_time: string | null
+    status: string | null
+  }>
+
+  // 知识点 → 关联教案集合（去重）；知识点 → 班级 → 课次聚合
+  const pointPlans = new Map<string, Set<string>>()
+  const pointClassAgg = new Map<
+    string,
+    Map<string, { className: string; count: number; lastFinished: string | null; lastAny: string | null }>
+  >()
+  const allClassIds = new Set<string>()
+
+  for (const r of rows) {
+    const kps = parseJSON<string[]>(r.knowledge_points, [])
+    for (const kp of kps) {
+      if (!kp) continue
+      if (!pointPlans.has(kp)) pointPlans.set(kp, new Set())
+      pointPlans.get(kp)!.add(r.plan_id)
+
+      if (r.class_id && r.class_name) {
+        allClassIds.add(r.class_id)
+        if (!pointClassAgg.has(kp)) pointClassAgg.set(kp, new Map())
+        const classMap = pointClassAgg.get(kp)!
+        if (!classMap.has(r.class_id)) {
+          classMap.set(r.class_id, {
+            className: r.class_name,
+            count: 0,
+            lastFinished: null,
+            lastAny: null
+          })
+        }
+        const agg = classMap.get(r.class_id)!
+        agg.count += 1
+        // 最近授课：已结课优先（status=finished），否则取最近排课时间
+        if (r.start_time) {
+          if (r.status === 'finished') {
+            if (!agg.lastFinished || r.start_time > agg.lastFinished) {
+              agg.lastFinished = r.start_time
+            }
+          }
+          if (!agg.lastAny || r.start_time > agg.lastAny) {
+            agg.lastAny = r.start_time
+          }
+        }
+      }
+    }
+  }
+
+  const points: KnowledgeCoveragePoint[] = []
+  for (const [point, plans] of pointPlans) {
+    const classMap = pointClassAgg.get(point)
+    const classes = classMap
+      ? [...classMap.entries()].map(([classId, agg]) => ({
+          classId,
+          className: agg.className,
+          lessonCount: agg.count,
+          lastTaughtAt: agg.lastFinished ?? agg.lastAny
+        }))
+      : []
+    // 班级按最近授课时间倒序（已授课的靠前，未授课的靠后）
+    classes.sort((a, b) => {
+      if (!a.lastTaughtAt && !b.lastTaughtAt) return a.className.localeCompare(b.className)
+      if (!a.lastTaughtAt) return 1
+      if (!b.lastTaughtAt) return -1
+      return b.lastTaughtAt.localeCompare(a.lastTaughtAt)
+    })
+    points.push({
+      point,
+      planCount: plans.size,
+      classCount: classes.length,
+      classes
+    })
+  }
+  // 知识点按覆盖班级数降序、教案数降序排列
+  points.sort((a, b) => b.classCount - a.classCount || b.planCount - a.planCount || a.point.localeCompare(b.point))
+
+  return {
+    points,
+    totalPoints: points.length,
+    totalClasses: allClassIds.size
+  }
 }

@@ -441,6 +441,91 @@
         </a-list>
       </a-tab-pane>
 
+      <!-- ============ 知识点覆盖度 ============ -->
+      <a-tab-pane key="coverage">
+        <template #tab>
+          <span><TagsOutlined /> 知识点覆盖</span>
+        </template>
+
+        <div class="tab-toolbar">
+          <span class="section-title">知识点覆盖度</span>
+          <a-space>
+            <a-button @click="loadKnowledgeCoverage"><ReloadOutlined /> 刷新</a-button>
+          </a-space>
+        </div>
+
+        <a-alert
+          type="info"
+          show-icon
+          message="按教案的知识点标签聚合班级覆盖情况"
+          description="在教案编辑器中为教案打上知识点标签后，这里会汇总每个知识点被多少班级的课次覆盖，帮助你发现尚未在某个班级讲授的知识点。"
+          style="margin-bottom: 16px"
+        />
+
+        <a-spin :spinning="knowledgeCoverageLoading">
+          <a-empty
+            v-if="!knowledgeCoverageLoading && knowledgeCoverage.points.length === 0"
+            description="暂无知识点数据，请在教案编辑器的「知识点标签」中为教案添加标签"
+          />
+          <template v-else>
+            <a-row :gutter="16" style="margin-bottom: 16px">
+              <a-col :span="8">
+                <a-statistic title="知识点总数" :value="knowledgeCoverage.totalPoints" />
+              </a-col>
+              <a-col :span="8">
+                <a-statistic title="涉及班级" :value="knowledgeCoverage.totalClasses" />
+              </a-col>
+              <a-col :span="8">
+                <a-statistic
+                  title="平均覆盖班级数"
+                  :value="knowledgeCoverage.totalPoints === 0 ? 0 : (knowledgeCoverage.points.reduce((s, p) => s + p.classCount, 0) / knowledgeCoverage.totalPoints).toFixed(1)"
+                />
+              </a-col>
+            </a-row>
+
+            <a-table
+              :data-source="knowledgeCoverage.points"
+              :columns="coverageColumns"
+              row-key="point"
+              :pagination="{ pageSize: 10, size: 'small' }"
+              size="small"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'point'">
+                  <a-tag color="geekblue">{{ record.point }}</a-tag>
+                </template>
+                <template v-else-if="column.key === 'planCount'">
+                  {{ record.planCount }} 份
+                </template>
+                <template v-else-if="column.key === 'classCount'">
+                  <a-tag :color="record.classCount === 0 ? 'default' : 'blue'">
+                    {{ record.classCount }} 个班级
+                  </a-tag>
+                </template>
+                <template v-else-if="column.key === 'classes'">
+                  <span v-if="record.classes.length === 0" class="text-muted">尚未在任何班级授课</span>
+                  <div v-else class="coverage-classes">
+                    <a-tooltip
+                      v-for="cls in record.classes"
+                      :key="cls.classId"
+                      :title="`${cls.className} · ${cls.lessonCount} 节课次${cls.lastTaughtAt ? ' · 最近：' + formatDate(cls.lastTaughtAt) : ' · 未授课'}`"
+                    >
+                      <a-tag
+                        :color="cls.lastTaughtAt ? 'green' : 'orange'"
+                        size="small"
+                      >
+                        {{ cls.className }}
+                        <span v-if="cls.lastTaughtAt" class="cov-date">{{ formatDate(cls.lastTaughtAt) }}</span>
+                      </a-tag>
+                    </a-tooltip>
+                  </div>
+                </template>
+              </template>
+            </a-table>
+          </template>
+        </a-spin>
+      </a-tab-pane>
+
       <!-- ============ 备课日历 ============ -->
       <a-tab-pane key="calendar">
         <template #tab>
@@ -1481,6 +1566,7 @@ import type {
   PrepOverview,
   PrepReadinessSnapshot,
   PrepStage,
+  KnowledgeCoverage,
   ScratchSavePayload,
   VersionMeta,
   DocLinkWithLesson,
@@ -1579,6 +1665,9 @@ const prepOverviewLoading = ref(false)
 // G20: 就绪度趋势日快照（近 30 天），看板加载后绘制趋势曲线
 const readinessTrend = ref<PrepReadinessSnapshot[]>([])
 const readinessTrendLoading = ref(false)
+// G22: 知识点覆盖度（按教案知识点标签聚合班级覆盖情况）
+const knowledgeCoverage = ref<KnowledgeCoverage>({ points: [], totalPoints: 0, totalClasses: 0 })
+const knowledgeCoverageLoading = ref(false)
 const planEditorVisible = ref(false)
 const planEditorIsEdit = ref(false)
 const planEditorVersionHasPlan = ref(false)
@@ -1903,6 +1992,28 @@ const trendSummary = computed<{ latest: number | null; avg: number | null; delta
   const delta = latest - snaps[0].readinessPct
   return { latest, avg, delta }
 })
+
+// ============ G22: 知识点覆盖度 ============
+const coverageColumns = [
+  { title: '知识点', key: 'point', dataIndex: 'point', width: 160 },
+  { title: '教案数', key: 'planCount', dataIndex: 'planCount', width: 100 },
+  { title: '覆盖班级', key: 'classCount', dataIndex: 'classCount', width: 120 },
+  { title: '班级覆盖明细', key: 'classes' }
+]
+
+/** 加载知识点覆盖度（按教案知识点标签聚合班级覆盖情况） */
+async function loadKnowledgeCoverage(): Promise<void> {
+  knowledgeCoverageLoading.value = true
+  try {
+    const cov = await call(window.api.lessonPlan.knowledgeCoverage())
+    knowledgeCoverage.value = cov
+  } catch (e) {
+    message.error(`加载知识点覆盖度失败：${String(e instanceof Error ? e.message : e)}`)
+    knowledgeCoverage.value = { points: [], totalPoints: 0, totalClasses: 0 }
+  } finally {
+    knowledgeCoverageLoading.value = false
+  }
+}
 
 function fmtOverviewTime(iso: string): string {
   return dayjs(iso).format('MM-DD HH:mm')
@@ -3267,6 +3378,7 @@ onMounted(() => {
   loadPrepOverview()
   loadCalendarLessons()
   loadPlanFilterOptions()
+  loadKnowledgeCoverage()
 
   const subscribe = window.events['scratch:save-request'] as unknown as SubscribeSave
   offScratchSave = subscribe((payload) => {
@@ -3550,6 +3662,17 @@ onUnmounted(() => {
 }
 .plan-knowledge .anticon {
   margin-right: 2px;
+}
+/* G22: 知识点覆盖度表格中的班级标签集合 */
+.coverage-classes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.coverage-classes .cov-date {
+  margin-left: 4px;
+  color: #6b7280;
+  font-size: 11px;
 }
 .plan-usage {
   display: flex;
