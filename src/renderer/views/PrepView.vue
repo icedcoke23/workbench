@@ -114,6 +114,7 @@
           <span class="section-title">教案</span>
           <a-space>
             <a-button @click="loadPlans"><ReloadOutlined /> 刷新</a-button>
+            <a-button @click="openTemplateGallery"><CopyOutlined /> 从模板新建</a-button>
             <a-button type="primary" @click="openNewPlanModal"><PlusOutlined /> 新建教案</a-button>
           </a-space>
         </div>
@@ -697,17 +698,46 @@
             />
           </a-collapse-panel>
           <a-collapse-panel key="preparation" header="教学准备">
+            <div class="segment-toolbar">
+              <a-button size="small" @click="openResourcePicker">
+                <AppstoreOutlined /> 插入资源库素材
+              </a-button>
+              <span class="segment-toolbar-hint">从资源库选择素材，插入到此处作为准备清单</span>
+            </div>
             <a-textarea
+              ref="preparationTextareaRef"
               v-model:value="planForm.preparation"
               :rows="3"
-              placeholder="课前准备事项：素材、环境、教具等"
+              placeholder="课前准备事项：素材、环境、教具等；可点击上方按钮插入资源库素材"
             />
           </a-collapse-panel>
           <a-collapse-panel key="process" header="教学过程">
+            <div class="segment-toolbar">
+              <a-dropdown :trigger="['click']">
+                <a-button size="small">
+                  <PlusOutlined /> 插入教学环节
+                </a-button>
+                <template #overlay>
+                  <a-menu @click="onSegmentMenuClick">
+                    <a-menu-item
+                      v-for="snip in teachingSnippets"
+                      :key="snip.id"
+                    >
+                      <div class="segment-menu-item">
+                        <span class="segment-menu-name">{{ snip.name }}</span>
+                        <span class="segment-menu-time">约 {{ snip.suggestedMinutes }} 分钟</span>
+                      </div>
+                    </a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
+              <span class="segment-toolbar-hint">在光标位置插入结构化教学片段</span>
+            </div>
             <a-textarea
+              ref="processTextareaRef"
               v-model:value="planForm.process"
               :rows="6"
-              placeholder="课堂推进步骤，可分阶段描述"
+              placeholder="课堂推进步骤，可分阶段描述；可点击上方按钮快速插入教学环节片段"
             />
           </a-collapse-panel>
           <a-collapse-panel key="reflection" header="课后反思">
@@ -728,11 +758,143 @@
         />
       </a-form>
     </a-modal>
+
+    <!-- ============ 教案模板库 Modal ============ -->
+    <a-modal
+      v-model:open="templateGalleryVisible"
+      title="教案模板库"
+      :footer="null"
+      width="780px"
+    >
+      <a-alert
+        type="info"
+        show-icon
+        message="选用模板会预填教案的四个章节内容"
+        description="反思章节不会预填（属课后内容）。选用后请选择关联版本，并按实际学情调整内容后保存。"
+        style="margin-bottom: 16px"
+      />
+      <div class="tpl-filter">
+        <a-radio-group v-model:value="templateFilterCategory" button-style="solid">
+          <a-radio-button value="">全部</a-radio-button>
+          <a-radio-button
+            v-for="cat in templateCategories"
+            :key="cat"
+            :value="cat"
+          >
+            {{ LESSON_PLAN_TEMPLATE_CATEGORY_TEXT[cat] }}
+          </a-radio-button>
+        </a-radio-group>
+      </div>
+      <a-list
+        :data-source="filteredTemplates"
+        :grid="{ gutter: 16, column: 2 }"
+        :locale="{ emptyText: '该分类暂无模板' }"
+      >
+        <template #renderItem="{ item }">
+          <a-card class="tpl-card" size="small" hoverable>
+            <template #title>
+              <div class="tpl-title">
+                <span class="tpl-name">{{ item.name }}</span>
+                <a-tag :color="LESSON_PLAN_TEMPLATE_CATEGORY_COLOR[item.category]" size="small">
+                  {{ LESSON_PLAN_TEMPLATE_CATEGORY_TEXT[item.category] }}
+                </a-tag>
+              </div>
+            </template>
+            <template #extra>
+              <a-tag color="orange" size="small">
+                <ScheduleOutlined /> {{ item.durationMinutes }} 分钟
+              </a-tag>
+            </template>
+            <p class="tpl-desc">{{ item.description }}</p>
+            <div class="tpl-sections">
+              <a-tag v-if="item.objectives" color="green" size="small">目标</a-tag>
+              <a-tag v-if="item.keyPoints" color="blue" size="small">重难点</a-tag>
+              <a-tag v-if="item.preparation" color="cyan" size="small">准备</a-tag>
+              <a-tag v-if="item.process" color="purple" size="small">过程</a-tag>
+            </div>
+            <a-button
+              type="primary"
+              size="small"
+              block
+              style="margin-top: 10px"
+              @click="applyTemplate(item)"
+            >
+              选用此模板
+            </a-button>
+          </a-card>
+        </template>
+      </a-list>
+    </a-modal>
+
+    <!-- ============ 资源库选择器 Modal（插入教学准备） ============ -->
+    <a-modal
+      v-model:open="resourcePickerVisible"
+      title="选择资源库素材"
+      :footer="null"
+      width="640px"
+    >
+      <a-alert
+        type="info"
+        show-icon
+        message="点击素材将其以 Markdown 列表项插入「教学准备」光标处"
+        style="margin-bottom: 12px"
+      />
+      <div class="resource-picker-filter">
+        <a-select
+          v-model:value="resourcePickerFilter.type"
+          style="width: 120px"
+          placeholder="类型"
+          allow-clear
+          @change="loadResourcePicker"
+        >
+          <a-select-option value="backdrop">背景</a-select-option>
+          <a-select-option value="sprite">角色</a-select-option>
+          <a-select-option value="sound">音效</a-select-option>
+        </a-select>
+        <a-input-search
+          v-model:value="resourcePickerFilter.keyword"
+          placeholder="按名称搜索"
+          style="width: 220px"
+          allow-clear
+          @search="loadResourcePicker"
+        />
+      </div>
+      <a-list
+        :data-source="resourcePickerList"
+        :loading="resourcePickerLoading"
+        :locale="{ emptyText: '没有匹配的素材' }"
+        size="small"
+      >
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta>
+              <template #title>
+                <span>{{ item.name }}</span>
+                <a-tag size="small" style="margin-left: 6px">
+                  {{ item.type === 'backdrop' ? '背景' : item.type === 'sprite' ? '角色' : '音效' }}
+                </a-tag>
+              </template>
+              <template #description>
+                <span v-if="item.tags && item.tags.length" class="rp-tags">
+                  标签：{{ item.tags.join('、') }}
+                </span>
+                <span v-else class="rp-tags">无标签</span>
+              </template>
+            </a-list-item-meta>
+            <template #actions>
+              <a-button size="small" type="primary" @click="insertResource(item)">
+                插入
+              </a-button>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import {
   BulbOutlined,
   AppstoreOutlined,
@@ -757,6 +919,14 @@ import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { call } from '@renderer/api'
 import { subscribeRefresh, subscribeNewItem } from '@renderer/composables/useShortcuts'
+import {
+  LESSON_PLAN_TEMPLATES,
+  LESSON_PLAN_TEMPLATE_CATEGORY_TEXT,
+  LESSON_PLAN_TEMPLATE_CATEGORY_COLOR
+} from '@shared/lesson-plan-templates'
+import type { LessonPlanTemplate, LessonPlanTemplateCategory } from '@shared/lesson-plan-templates'
+import { TEACHING_SEGMENT_SNIPPETS } from '@shared/lesson-plan-snippets'
+import type { TeachingSegmentSnippet } from '@shared/lesson-plan-snippets'
 import type {
   Idea,
   IdeaStatus,
@@ -859,6 +1029,28 @@ const planSubmitting = ref(false)
 const planAiGenerating = ref(false)
 const aiConfigured = ref(false)
 const planAiDraftText = ref('')
+// 教案模板库（G6-1）
+const templateGalleryVisible = ref(false)
+const templateFilterCategory = ref<LessonPlanTemplateCategory | ''>('')
+const templateCategories = computed(() => {
+  const set = new Set<LessonPlanTemplateCategory>()
+  for (const t of LESSON_PLAN_TEMPLATES) set.add(t.category)
+  return [...set]
+})
+const filteredTemplates = computed<LessonPlanTemplate[]>(() => {
+  const cat = templateFilterCategory.value
+  if (!cat) return LESSON_PLAN_TEMPLATES
+  return LESSON_PLAN_TEMPLATES.filter((t) => t.category === cat)
+})
+// 教学环节片段（G6-2）
+const teachingSnippets = ref<TeachingSegmentSnippet[]>(TEACHING_SEGMENT_SNIPPETS)
+const processTextareaRef = ref<{ resizableTextArea?: { textArea?: HTMLTextAreaElement } } | null>(null)
+// 资源库素材选择器（G6-3）
+const preparationTextareaRef = ref<{ resizableTextArea?: { textArea?: HTMLTextAreaElement } } | null>(null)
+const resourcePickerVisible = ref(false)
+const resourcePickerLoading = ref(false)
+const resourcePickerList = ref<Resource[]>([])
+const resourcePickerFilter = reactive<{ type: string; keyword: string }>({ type: '', keyword: '' })
 const planForm = reactive<{
   ideaVersionId: string | undefined
   ideaId: string | undefined
@@ -947,6 +1139,115 @@ function openNewPlanModal(): void {
   planEditorIsEdit.value = false
   resetPlanForm()
   planEditorVisible.value = true
+}
+
+// ============ 教案模板库（G6-1） ============
+function openTemplateGallery(): void {
+  templateFilterCategory.value = ''
+  templateGalleryVisible.value = true
+}
+
+/** 选用模板：预填教案四章节内容并打开编辑器，需用户补选关联版本后保存 */
+function applyTemplate(tpl: LessonPlanTemplate): void {
+  planEditorIsEdit.value = false
+  resetPlanForm()
+  planForm.title = tpl.name
+  planForm.objectives = tpl.objectives
+  planForm.keyPoints = tpl.keyPoints
+  planForm.preparation = tpl.preparation
+  planForm.process = tpl.process
+  planForm.durationMinutes = tpl.durationMinutes
+  templateGalleryVisible.value = false
+  planEditorVisible.value = true
+  message.info('已套用模板，请选择关联版本并按学情调整后保存')
+}
+
+// ============ 教学环节片段插入（G6-2） ============
+function snippetById(id: string): TeachingSegmentSnippet | undefined {
+  return teachingSnippets.value.find((s) => s.id === id)
+}
+
+/** 下拉菜单点击：以 menu key 取对应片段插入到「教学过程」光标处 */
+function onSegmentMenuClick(info: { key: unknown }): void {
+  const snip = snippetById(String(info.key))
+  if (snip) insertSegment(snip, processTextareaRef.value, 'process')
+}
+
+/**
+ * 在指定文本框的光标位置插入片段内容；无光标信息时追加到末尾。
+ * @param field 控制插入到 planForm 的哪个章节
+ */
+function insertSegment(
+  snip: TeachingSegmentSnippet,
+  textareaRef: { resizableTextArea?: { textArea?: HTMLTextAreaElement } } | null,
+  field: 'process'
+): void {
+  const el = textareaRef?.resizableTextArea?.textArea
+  const content = snip.content
+  if (!el) {
+    planForm[field] = planForm[field] ? `${planForm[field]}\n\n${content}` : content
+    return
+  }
+  const start = el.selectionStart ?? planForm[field].length
+  const end = el.selectionEnd ?? planForm[field].length
+  const before = planForm[field].slice(0, start)
+  const after = planForm[field].slice(end)
+  const needNewlineBefore = before.length > 0 && !before.endsWith('\n')
+  const needNewlineAfter = after.length > 0 && !after.startsWith('\n')
+  const inserted = `${needNewlineBefore ? '\n\n' : ''}${content}${needNewlineAfter ? '\n\n' : ''}`
+  planForm[field] = before + inserted + after
+  nextTick(() => {
+    const pos = (before + inserted).length
+    el.focus()
+    el.setSelectionRange(pos, pos)
+  })
+}
+
+// ============ 资源库素材插入教学准备（G6-3） ============
+async function loadResourcePicker(): Promise<void> {
+  resourcePickerLoading.value = true
+  try {
+    const q: { type?: ResourceType; keyword?: string } = {}
+    if (resourcePickerFilter.type) q.type = resourcePickerFilter.type as ResourceType
+    if (resourcePickerFilter.keyword) q.keyword = resourcePickerFilter.keyword
+    resourcePickerList.value = await call(window.api.resource.list(q))
+  } catch (e) {
+    message.error(`加载素材失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    resourcePickerLoading.value = false
+  }
+}
+
+function openResourcePicker(): void {
+  resourcePickerFilter.type = ''
+  resourcePickerFilter.keyword = ''
+  resourcePickerVisible.value = true
+  loadResourcePicker()
+}
+
+/** 将选中的资源以 Markdown 列表项插入「教学准备」光标处 */
+function insertResource(res: Resource): void {
+  const typeText = res.type === 'backdrop' ? '背景' : res.type === 'sprite' ? '角色' : '音效'
+  const tagPart = res.tags && res.tags.length ? `（标签: ${res.tags.join('、')}）` : ''
+  const line = `- 【${typeText}】${res.name}${tagPart}`
+  const el = preparationTextareaRef.value?.resizableTextArea?.textArea
+  if (!el) {
+    planForm.preparation = planForm.preparation
+      ? `${planForm.preparation}\n${line}`
+      : line
+  } else {
+    const start = el.selectionStart ?? planForm.preparation.length
+    const end = el.selectionEnd ?? planForm.preparation.length
+    const before = planForm.preparation.slice(0, start)
+    const after = planForm.preparation.slice(end)
+    const needNewlineBefore = before.length > 0 && !before.endsWith('\n')
+    planForm.preparation = `${before}${needNewlineBefore ? '\n' : ''}${line}${after.startsWith('\n') || after.length === 0 ? '' : '\n'}${after}`
+    nextTick(() => {
+      const pos = (before + (needNewlineBefore ? '\n' : '') + line).length
+      el.focus()
+      el.setSelectionRange(pos, pos)
+    })
+  }
 }
 
 /** 从版本入口打开教案编辑器：自动加载已有教案内容，无则新建 */
@@ -1982,5 +2283,73 @@ onUnmounted(() => {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: inherit;
+}
+
+/* 教案模板库 */
+.tpl-filter {
+  margin-bottom: 16px;
+}
+.tpl-card {
+  height: 100%;
+}
+.tpl-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.tpl-name {
+  font-weight: 600;
+}
+.tpl-desc {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0 0 8px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tpl-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* 教学环节片段 / 资源插入工具条 */
+.segment-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.segment-toolbar-hint {
+  font-size: 12px;
+  color: #9ca3af;
+}
+.segment-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 200px;
+}
+.segment-menu-name {
+  font-size: 13px;
+}
+.segment-menu-time {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* 资源库选择器 */
+.resource-picker-filter {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.rp-tags {
+  font-size: 12px;
+  color: #9ca3af;
 }
 </style>
