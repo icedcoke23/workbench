@@ -1,5 +1,10 @@
 import { resolveAISettings, streamAI, sanitizeUserInput } from './ai'
-import { buildLessonPlanDraftUserMessage, getLessonPlanSystemPrompt } from '../lib/prompts'
+import {
+  buildLessonPlanDraftUserMessage,
+  getLessonPlanSystemPrompt,
+  buildLessonPlanReviewUserMessage,
+  getLessonPlanReviewSystemPrompt
+} from '../lib/prompts'
 import * as scratchService from './scratch'
 import * as ideaRepo from '../database/repositories/ideas'
 import * as lessonPlanRepo from '../database/repositories/lesson-plans'
@@ -51,6 +56,55 @@ export async function generateDraft(
     ],
     (delta) => onChunk?.(delta),
     0.7
+  )
+
+  return fullText
+}
+
+/**
+ * AI 教案优化建议（流式，通过 onChunk 回调推送增量）。
+ *
+ * 读取指定教案的完整内容，连同点子标题、版本名、预计时长交给 AI，
+ * 输出结构化点评与优化建议（总体评价 / 优点 / 优化建议 / 重点修订示范）。
+ *
+ * @param planId 教案 ID
+ * @param onChunk 流式增量回调
+ */
+export async function reviewPlan(
+  planId: string,
+  onChunk?: (delta: string) => void
+): Promise<string> {
+  const settings = resolveAISettings()
+  if (!settings) throw new Error('AI 未配置，请在设置中配置第三方 AI 参数')
+
+  const plan = lessonPlanRepo.get(planId)
+  if (!plan) throw new Error('教案不存在')
+
+  const version = plan.ideaVersionId ? ideaRepo.getVersion(plan.ideaVersionId) : null
+  const idea = version ? ideaRepo.get(version.ideaId) : null
+
+  const userMessage = buildLessonPlanReviewUserMessage({
+    ideaTitle: idea?.title,
+    versionName: version?.versionName,
+    durationMinutes: plan.durationMinutes,
+    plan: {
+      title: plan.title,
+      objectives: plan.objectives,
+      keyPoints: plan.keyPoints,
+      preparation: plan.preparation,
+      process: plan.process,
+      reflection: plan.reflection
+    }
+  })
+
+  const fullText = await streamAI(
+    settings,
+    [
+      { role: 'system', content: getLessonPlanReviewSystemPrompt() },
+      { role: 'user', content: sanitizeUserInput(userMessage, 6000) }
+    ],
+    (delta) => onChunk?.(delta),
+    0.6
   )
 
   return fullText

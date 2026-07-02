@@ -876,6 +876,44 @@
           description="保存将覆盖现有教案内容。"
           style="margin-top: 12px"
         />
+
+        <!-- AI 教案优化建议（G7-3） -->
+        <div class="plan-review-toolbar">
+          <a-button
+            type="primary"
+            ghost
+            :loading="planReviewing"
+            :disabled="!canReviewPlan"
+            @click="reviewCurrentPlan"
+          >
+            <template #icon><ThunderboltOutlined /></template>
+            AI 优化建议
+          </a-button>
+          <span v-if="!aiConfigured" class="plan-ai-hint">
+            未配置 AI，请在「设置」中配置第三方 AI 参数
+          </span>
+          <span v-else-if="!editingPlanId" class="plan-ai-hint">
+            请先保存教案，再获取优化建议
+          </span>
+          <span v-else-if="planReviewing" class="plan-ai-hint">
+            正在分析教案…
+          </span>
+          <span v-else class="plan-ai-hint">
+            基于当前教案内容生成点评与改进建议（点击会先保存最新内容）
+          </span>
+        </div>
+        <div v-if="planReviewing || planReviewText" class="plan-review-panel">
+          <div class="plan-review-label">
+            AI 优化建议：
+            <a-button
+              v-if="planReviewText && !planReviewing"
+              size="small"
+              type="link"
+              @click="planReviewText = ''"
+            >清空</a-button>
+          </div>
+          <pre class="plan-review-text">{{ planReviewText || '正在生成…' }}</pre>
+        </div>
       </a-form>
     </a-modal>
 
@@ -1155,10 +1193,15 @@ const planEditorVisible = ref(false)
 const planEditorIsEdit = ref(false)
 const planEditorVersionHasPlan = ref(false)
 const planSubmitting = ref(false)
+/** 当前编辑中的教案 ID（仅编辑已有教案时有值，供 AI 优化建议使用） */
+const editingPlanId = ref<string | null>(null)
 // AI 辅助生成教案草稿
 const planAiGenerating = ref(false)
 const aiConfigured = ref(false)
 const planAiDraftText = ref('')
+// AI 教案优化建议（G7-3）
+const planReviewing = ref(false)
+const planReviewText = ref('')
 // 教案模板库（G6-1）
 const templateGalleryVisible = ref(false)
 const templateFilterCategory = ref<LessonPlanTemplateCategory | ''>('')
@@ -1344,6 +1387,8 @@ function resetPlanForm(): void {
   planForm.reflection = ''
   planForm.durationMinutes = null
   planEditorVersionHasPlan.value = false
+  editingPlanId.value = null
+  planReviewText.value = ''
 }
 
 function openNewPlanModal(): void {
@@ -1472,6 +1517,7 @@ async function openPlanForVersion(versionId: string): Promise<void> {
     if (existing) {
       planEditorIsEdit.value = true
       planEditorVersionHasPlan.value = true
+      editingPlanId.value = existing.id
       planForm.ideaId = existing.ideaId
       planForm.title = existing.title ?? ''
       planForm.objectives = existing.objectives ?? ''
@@ -1539,8 +1585,11 @@ async function submitPlan(): Promise<void> {
       reflection: planForm.reflection.trim() || null,
       durationMinutes: planForm.durationMinutes
     }
-    await call(window.api.lessonPlan.upsert(input))
-    message.success(planEditorIsEdit.value ? '教案已保存' : '教案已创建')
+    const wasEdit = planEditorIsEdit.value
+    const saved = await call(window.api.lessonPlan.upsert(input))
+    editingPlanId.value = saved.id
+    planEditorIsEdit.value = true
+    message.success(wasEdit ? '教案已保存' : '教案已创建')
     planEditorVisible.value = false
     await loadPlans()
     await loadPrepOverview()
@@ -1645,6 +1694,54 @@ async function generatePlanDraft(): Promise<void> {
   } finally {
     planAiGenerating.value = false
     planAiDraftText.value = ''
+  }
+}
+
+// ============ AI 教案优化建议（G7-3） ============
+/** 是否可以发起 AI 优化建议：已配置 AI 且当前正在编辑已保存的教案 */
+const canReviewPlan = computed(
+  () => !!editingPlanId.value && aiConfigured.value && !planReviewing.value
+)
+
+/**
+ * 基于当前教案内容发起 AI 优化建议。
+ * 先将编辑器中的最新内容保存（确保 AI 点评基于最新版本），再流式拉取建议，
+ * 增量累加到 planReviewText 供实时预览。
+ */
+async function reviewCurrentPlan(): Promise<void> {
+  if (!editingPlanId.value || !planForm.ideaVersionId) {
+    message.warning('请先保存教案再获取优化建议')
+    return
+  }
+  if (!aiConfigured.value) {
+    message.warning('未配置 AI，请在「设置」中配置第三方 AI 参数')
+    return
+  }
+  planReviewing.value = true
+  planReviewText.value = ''
+  try {
+    // 先保存当前编辑内容，确保 AI 点评基于最新版本
+    const input: LessonPlanInput = {
+      ideaVersionId: planForm.ideaVersionId,
+      title: planForm.title.trim() || null,
+      objectives: planForm.objectives.trim() || null,
+      keyPoints: planForm.keyPoints.trim() || null,
+      preparation: planForm.preparation.trim() || null,
+      process: planForm.process.trim() || null,
+      reflection: planForm.reflection.trim() || null,
+      durationMinutes: planForm.durationMinutes
+    }
+    const saved = await call(window.api.lessonPlan.upsert(input))
+    editingPlanId.value = saved.id
+    planEditorIsEdit.value = true
+
+    await call(window.api.lessonPlan.review(saved.id))
+    // 流式期间 chunk 已累加到 planReviewText，无需额外处理
+    message.success('AI 优化建议已生成')
+  } catch (e) {
+    message.error(`AI 优化建议失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    planReviewing.value = false
   }
 }
 
@@ -2185,6 +2282,8 @@ let offNewItem: (() => void) | null = null
 // 教案草稿流式 chunk 订阅
 type PlanChunkRegistrar = (cb: (delta: string) => void) => () => void
 let offPlanChunk: (() => void) | null = null
+// 教案优化建议流式 chunk 订阅
+let offPlanReviewChunk: (() => void) | null = null
 
 onMounted(() => {
   loadIdeas()
@@ -2206,6 +2305,14 @@ onMounted(() => {
     if (delta === '[DONE]') return
     planAiDraftText.value += delta
   })
+
+  // 订阅教案优化建议流式输出：累加到 planReviewText 供实时预览
+  offPlanReviewChunk = (window.events['lessonPlan:reviewChunk'] as unknown as PlanChunkRegistrar)(
+    (delta) => {
+      if (delta === '[DONE]') return
+      planReviewText.value += delta
+    }
+  )
 
   // 检测 AI 是否已配置，控制「AI 生成草稿」按钮可用性
   call(window.api.settings.get())
@@ -2240,6 +2347,8 @@ onUnmounted(() => {
   offNewItem = null
   offPlanChunk?.()
   offPlanChunk = null
+  offPlanReviewChunk?.()
+  offPlanReviewChunk = null
 })
 </script>
 
@@ -2510,6 +2619,42 @@ onUnmounted(() => {
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+}
+/* AI 教案优化建议 */
+.plan-review-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 8px;
+  padding-top: 12px;
+  border-top: 1px dashed #e5e7eb;
+}
+.plan-review-panel {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
+.plan-review-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: #874d00;
+  margin-bottom: 4px;
+}
+.plan-review-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
   color: #374151;
   white-space: pre-wrap;
   word-break: break-word;

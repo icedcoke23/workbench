@@ -99,6 +99,16 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('lessonPlan:prepOverview', () =>
     tryRun(() => lessonPlanService.buildPrepOverview())
   )
+  ipcMain.handle('lessonPlan:review', async (e, planId) =>
+    tryRunAsync(async () => {
+      const win = BrowserWindow.fromWebContents(e.sender) ?? getMainWindow()
+      const full = await lessonPlanService.reviewPlan(planId, (delta) => {
+        win?.webContents.send('lessonPlan:reviewChunk', delta)
+      })
+      win?.webContents.send('lessonPlan:reviewChunk', '[DONE]')
+      return full
+    })
+  )
 
   // ============ 待办 ============
   ipcMain.handle('todo:list', () => tryRun(() => todoRepo.list()))

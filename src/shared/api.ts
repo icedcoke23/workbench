@@ -45,7 +45,7 @@ export const API_METHODS: Record<string, string[]> = {
   class: ['list', 'get', 'create', 'update', 'remove', 'members', 'addMembers', 'removeMember'],
   lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'records', 'score', 'pick'],
   idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'updateVersion', 'removeVersion', 'getVersionMeta'],
-  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'generateDraft', 'exportMarkdown', 'prepOverview'],
+  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'generateDraft', 'exportMarkdown', 'prepOverview', 'review'],
   todo: ['list', 'create', 'update', 'remove', 'regenerate'],
   resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags', 'readFile'],
   feedback: ['list', 'get', 'save', 'remove', 'generate', 'generateReport', 'exportPdf', 'sendWeChat'],
@@ -116,6 +116,7 @@ export interface WorkbenchAPI {
     generateDraft: (versionId: ID, durationMinutes?: number | null) => Promise<Result<string>>
     exportMarkdown: (id: ID) => Promise<Result<string | null>>
     prepOverview: () => Promise<Result<PrepOverview>>
+    review: (planId: ID) => Promise<Result<string>>
   }
   // 待办
   todo: {
@@ -214,6 +215,7 @@ export interface WorkbenchEvents {
   'scratch:save-request': (cb: (payload: ScratchSavePayload) => void) => () => void
   'feedback:chunk': (cb: (delta: string) => void) => () => void
   'lessonPlan:chunk': (cb: (delta: string) => void) => () => void
+  'lessonPlan:reviewChunk': (cb: (delta: string) => void) => () => void
   'sync:status': (cb: (status: { running: boolean; message: string }) => void) => () => void
   'menu:action': (cb: (action: MenuAction) => void) => () => void
 }

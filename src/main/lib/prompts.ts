@@ -187,3 +187,77 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
+
+// ============ AI 教案优化建议 ============
+
+export function getLessonPlanReviewSystemPrompt(): string {
+  return `你是一位资深少儿编程教研顾问，擅长审阅 Scratch 编程课教案并给出可落地的优化建议。请对教师提交的教案进行专业点评，指出问题并给出具体改进方案。
+
+## 输出格式（严格使用 Markdown，按以下结构输出，不要前后多余文字）
+
+### 总体评价
+（2-3 句话概括教案整体质量与适用性）
+
+### 优点
+（以「- 」列出 2-4 条值得肯定的设计，结合具体章节内容）
+
+### 优化建议
+（按章节给出可操作的改进点，每条格式为「- 【章节名】具体建议」，章节包括：教学目标 / 教学重难点 / 教学准备 / 教学过程 / 课后反思；至少给出 3 条建议）
+
+### 重点修订示范
+（针对「教学过程」中最需优化的 1 个环节，给出改写后的示范文案，用引用块 「>」 呈现，控制在 150 字以内）
+
+## 评审标准
+- 教学目标是否具体可测、覆盖知识与技能/过程与方法/情感态度
+- 重难点是否准确、与作品内容匹配
+- 教学准备是否完备
+- 教学过程环节是否完整（导入→新授→实践→展示→总结）、时长分配是否合理、师生活动是否清晰
+- 是否贴合 8-12 岁青少年 Scratch 课堂实际
+- 课后反思方向是否有引导性
+
+## 撰写要求
+- 语言专业、客观、建设性，避免空泛套话
+- 建议要具体到可执行的操作（如「将 X 环节时长从 10 分钟调整为 15 分钟，增加 Y 步骤」）
+- 不要重写整份教案，只做点评与重点示范`
+}
+
+export function buildLessonPlanReviewUserMessage(params: {
+  ideaTitle?: string | null
+  versionName?: string | null
+  durationMinutes?: number | null
+  plan: {
+    title?: string | null
+    objectives?: string | null
+    keyPoints?: string | null
+    preparation?: string | null
+    process?: string | null
+    reflection?: string | null
+  }
+}): string {
+  const { ideaTitle, versionName, durationMinutes, plan } = params
+  const section = (label: string, content: string | null | undefined): string => {
+    return `### ${label}\n${content && content.trim() ? content.trim() : '（未填写）'}`
+  }
+
+  return `请审阅以下 Scratch 编程课教案并给出优化建议。
+
+## 教案基本信息
+- 点子标题：${ideaTitle || '未指定'}
+- 版本名：${versionName || '未指定'}
+- 预计时长：${durationMinutes ? `${durationMinutes} 分钟` : '未指定'}
+- 教案标题：${plan.title || '未命名'}
+
+## 教案内容
+
+${section('教学目标', plan.objectives)}
+
+${section('教学重难点', plan.keyPoints)}
+
+${section('教学准备', plan.preparation)}
+
+${section('教学过程', plan.process)}
+
+${section('课后反思', plan.reflection)}
+
+请按输出格式给出点评与优化建议。`
+}
