@@ -798,6 +798,15 @@
           <span v-else-if="planAiGenerating" class="plan-ai-hint">
             正在生成…
           </span>
+          <a-tooltip title="将当前教案四章节内容保存为可复用的自定义模板">
+            <a-button
+              :disabled="!planForm.title.trim() || !planForm.objectives && !planForm.keyPoints && !planForm.preparation && !planForm.process"
+              @click="saveCurrentAsTemplate"
+            >
+              <template #icon><SaveOutlined /></template>
+              保存为模板
+            </a-button>
+          </a-tooltip>
         </div>
         <div v-if="planAiGenerating && planAiDraftText" class="plan-ai-preview">
           <div class="plan-ai-preview-label">AI 实时输出：</div>
@@ -951,12 +960,16 @@
             :key="cat"
             :value="cat"
           >
-            {{ LESSON_PLAN_TEMPLATE_CATEGORY_TEXT[cat] }}
+            {{ cat === 'custom' ? '我的模板' : LESSON_PLAN_TEMPLATE_CATEGORY_TEXT[cat] }}
           </a-radio-button>
         </a-radio-group>
+        <span class="tpl-filter-hint">
+          内置模板不可修改；「我的模板」由你从教案保存，可随时选用或删除。
+        </span>
       </div>
       <a-list
         :data-source="filteredTemplates"
+        :loading="customTemplatesLoading"
         :grid="{ gutter: 16, column: 2 }"
         :locale="{ emptyText: '该分类暂无模板' }"
       >
@@ -965,32 +978,43 @@
             <template #title>
               <div class="tpl-title">
                 <span class="tpl-name">{{ item.name }}</span>
-                <a-tag :color="LESSON_PLAN_TEMPLATE_CATEGORY_COLOR[item.category]" size="small">
-                  {{ LESSON_PLAN_TEMPLATE_CATEGORY_TEXT[item.category] }}
+                <a-tag
+                  :color="item.source === 'custom' ? 'magenta' : LESSON_PLAN_TEMPLATE_CATEGORY_COLOR[item.category as LessonPlanTemplateCategory]"
+                  size="small"
+                >
+                  {{ item.source === 'custom' ? '我的模板' : LESSON_PLAN_TEMPLATE_CATEGORY_TEXT[item.category as LessonPlanTemplateCategory] }}
                 </a-tag>
               </div>
             </template>
             <template #extra>
-              <a-tag color="orange" size="small">
+              <a-tag v-if="item.durationMinutes" color="orange" size="small">
                 <ScheduleOutlined /> {{ item.durationMinutes }} 分钟
               </a-tag>
             </template>
-            <p class="tpl-desc">{{ item.description }}</p>
+            <p class="tpl-desc">{{ item.description || '（无描述）' }}</p>
             <div class="tpl-sections">
               <a-tag v-if="item.objectives" color="green" size="small">目标</a-tag>
               <a-tag v-if="item.keyPoints" color="blue" size="small">重难点</a-tag>
               <a-tag v-if="item.preparation" color="cyan" size="small">准备</a-tag>
               <a-tag v-if="item.process" color="purple" size="small">过程</a-tag>
             </div>
-            <a-button
-              type="primary"
-              size="small"
-              block
-              style="margin-top: 10px"
-              @click="applyTemplate(item)"
-            >
-              选用此模板
-            </a-button>
+            <div class="tpl-actions">
+              <a-button
+                type="primary"
+                size="small"
+                style="flex: 1"
+                @click="applyTemplate(item)"
+              >
+                选用此模板
+              </a-button>
+              <a-popconfirm
+                v-if="item.source === 'custom'"
+                title="确认删除该自定义模板？"
+                @confirm="removeCustomTemplate(item.id)"
+              >
+                <a-button size="small" danger><DeleteOutlined /></a-button>
+              </a-popconfirm>
+            </div>
           </a-card>
         </template>
       </a-list>
@@ -1099,7 +1123,8 @@ import {
   LESSON_PLAN_TEMPLATE_CATEGORY_TEXT,
   LESSON_PLAN_TEMPLATE_CATEGORY_COLOR
 } from '@shared/lesson-plan-templates'
-import type { LessonPlanTemplate, LessonPlanTemplateCategory } from '@shared/lesson-plan-templates'
+import type { LessonPlanTemplateCategory } from '@shared/lesson-plan-templates'
+import { SaveOutlined } from '@ant-design/icons-vue'
 import { TEACHING_SEGMENT_SNIPPETS } from '@shared/lesson-plan-snippets'
 import type { TeachingSegmentSnippet } from '@shared/lesson-plan-snippets'
 import type {
@@ -1111,6 +1136,8 @@ import type {
   Lesson,
   LessonPlan,
   LessonPlanInput,
+  LessonPlanTemplateRecord,
+  LessonPlanTemplateRecordInput,
   PrepOverview,
   PrepStage,
   ScratchSavePayload,
@@ -1215,18 +1242,61 @@ const planAiDraftText = ref('')
 // AI 教案优化建议（G7-3）
 const planReviewing = ref(false)
 const planReviewText = ref('')
-// 教案模板库（G6-1）
+// 教案模板库（G6-1 + G9-1 自定义模板）
 const templateGalleryVisible = ref(false)
-const templateFilterCategory = ref<LessonPlanTemplateCategory | ''>('')
-const templateCategories = computed(() => {
-  const set = new Set<LessonPlanTemplateCategory>()
+const templateFilterCategory = ref<LessonPlanTemplateCategory | 'custom' | ''>('')
+/** 模板库展示用的统一形状：内置（static）与自定义（record）合并 */
+type GalleryTemplate = {
+  source: 'builtin' | 'custom'
+  /** 内置用静态 id，自定义用数据库 id */
+  id: string
+  name: string
+  category: LessonPlanTemplateCategory | 'custom'
+  description: string
+  durationMinutes: number | null
+  objectives: string | null
+  keyPoints: string | null
+  preparation: string | null
+  process: string | null
+}
+const customTemplates = ref<LessonPlanTemplateRecord[]>([])
+const customTemplatesLoading = ref(false)
+const templateCategories = computed<Array<LessonPlanTemplateCategory | 'custom'>>(() => {
+  const set = new Set<LessonPlanTemplateCategory | 'custom'>()
   for (const t of LESSON_PLAN_TEMPLATES) set.add(t.category)
+  if (customTemplates.value.length > 0) set.add('custom')
   return [...set]
 })
-const filteredTemplates = computed<LessonPlanTemplate[]>(() => {
+/** 合并内置 + 自定义模板，并按分类过滤 */
+const filteredTemplates = computed<GalleryTemplate[]>(() => {
   const cat = templateFilterCategory.value
-  if (!cat) return LESSON_PLAN_TEMPLATES
-  return LESSON_PLAN_TEMPLATES.filter((t) => t.category === cat)
+  const builtin: GalleryTemplate[] = LESSON_PLAN_TEMPLATES.map((t) => ({
+    source: 'builtin',
+    id: t.id,
+    name: t.name,
+    category: t.category,
+    description: t.description,
+    durationMinutes: t.durationMinutes,
+    objectives: t.objectives,
+    keyPoints: t.keyPoints,
+    preparation: t.preparation,
+    process: t.process
+  }))
+  const custom: GalleryTemplate[] = customTemplates.value.map((t) => ({
+    source: 'custom',
+    id: t.id,
+    name: t.name,
+    category: 'custom',
+    description: t.description ?? '',
+    durationMinutes: t.durationMinutes,
+    objectives: t.objectives,
+    keyPoints: t.keyPoints,
+    preparation: t.preparation,
+    process: t.process
+  }))
+  const all = [...builtin, ...custom]
+  if (!cat) return all
+  return all.filter((t) => t.category === cat)
 })
 // 教学环节片段（G6-2）
 const teachingSnippets = ref<TeachingSegmentSnippet[]>(TEACHING_SEGMENT_SNIPPETS)
@@ -1471,25 +1541,72 @@ function openNewPlanModal(): void {
   planEditorVisible.value = true
 }
 
-// ============ 教案模板库（G6-1） ============
+// ============ 教案模板库（G6-1 + G9-1 自定义模板） ============
+async function loadCustomTemplates(): Promise<void> {
+  customTemplatesLoading.value = true
+  try {
+    customTemplates.value = await call(window.api.lessonPlanTemplate.list())
+  } catch (e) {
+    message.error(`加载自定义模板失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    customTemplatesLoading.value = false
+  }
+}
+
 function openTemplateGallery(): void {
   templateFilterCategory.value = ''
+  loadCustomTemplates()
   templateGalleryVisible.value = true
 }
 
 /** 选用模板：预填教案四章节内容并打开编辑器，需用户补选关联版本后保存 */
-function applyTemplate(tpl: LessonPlanTemplate): void {
+function applyTemplate(tpl: GalleryTemplate): void {
   planEditorIsEdit.value = false
   resetPlanForm()
   planForm.title = tpl.name
-  planForm.objectives = tpl.objectives
-  planForm.keyPoints = tpl.keyPoints
-  planForm.preparation = tpl.preparation
-  planForm.process = tpl.process
-  planForm.durationMinutes = tpl.durationMinutes
+  planForm.objectives = tpl.objectives ?? ''
+  planForm.keyPoints = tpl.keyPoints ?? ''
+  planForm.preparation = tpl.preparation ?? ''
+  planForm.process = tpl.process ?? ''
+  planForm.durationMinutes = tpl.durationMinutes ?? null
   templateGalleryVisible.value = false
   planEditorVisible.value = true
   message.info('已套用模板，请选择关联版本并按学情调整后保存')
+}
+
+/** 将当前编辑器中的教案内容保存为自定义模板 */
+async function saveCurrentAsTemplate(): Promise<void> {
+  if (!planForm.title.trim()) {
+    message.warning('请先填写教案标题作为模板名')
+    return
+  }
+  const input: LessonPlanTemplateRecordInput = {
+    name: planForm.title.trim(),
+    description: planForm.objectives ? planForm.objectives.slice(0, 80) : null,
+    durationMinutes: planForm.durationMinutes,
+    objectives: planForm.objectives || null,
+    keyPoints: planForm.keyPoints || null,
+    preparation: planForm.preparation || null,
+    process: planForm.process || null
+  }
+  try {
+    await call(window.api.lessonPlanTemplate.create(input))
+    message.success('已保存为自定义模板')
+    await loadCustomTemplates()
+  } catch (e) {
+    message.error(`保存模板失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
+/** 删除自定义模板（内置模板不可删） */
+async function removeCustomTemplate(id: string): Promise<void> {
+  try {
+    await call(window.api.lessonPlanTemplate.remove(id))
+    message.success('已删除模板')
+    await loadCustomTemplates()
+  } catch (e) {
+    message.error(`删除模板失败：${String(e instanceof Error ? e.message : e)}`)
+  }
 }
 
 // ============ 教学环节片段插入（G6-2） ============
@@ -2424,6 +2541,7 @@ onMounted(() => {
     loadPlans()
     loadPrepOverview()
     loadCalendarLessons()
+    loadCustomTemplates()
   })
   // 订阅全局新增事件：触发新建点子弹窗
   offNewItem = subscribeNewItem(openNewIdeaModal, 'prep')
@@ -2755,6 +2873,14 @@ onUnmounted(() => {
 /* 教案模板库 */
 .tpl-filter {
   margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.tpl-filter-hint {
+  font-size: 12px;
+  color: #9ca3af;
 }
 .tpl-card {
   height: 100%;
@@ -2782,6 +2908,11 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+.tpl-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 /* 教学环节片段 / 资源插入工具条 */

@@ -17,6 +17,8 @@ import type {
   LessonInput,
   LessonPlan,
   LessonPlanInput,
+  LessonPlanTemplateRecord,
+  LessonPlanTemplateRecordInput,
   LessonRecord,
   MenuAction,
   PageQuery,
@@ -46,6 +48,7 @@ export const API_METHODS: Record<string, string[]> = {
   lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'records', 'score', 'pick'],
   idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'updateVersion', 'removeVersion', 'getVersionMeta'],
   lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'generateDraft', 'exportMarkdown', 'exportPdf', 'prepOverview', 'review'],
+  lessonPlanTemplate: ['list', 'create', 'update', 'remove'],
   todo: ['list', 'create', 'update', 'remove', 'regenerate'],
   resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags', 'readFile'],
   feedback: ['list', 'get', 'save', 'remove', 'generate', 'generateReport', 'exportPdf', 'sendWeChat'],
@@ -118,6 +121,13 @@ export interface WorkbenchAPI {
     exportPdf: (id: ID) => Promise<Result<string | null>>
     prepOverview: () => Promise<Result<PrepOverview>>
     review: (planId: ID) => Promise<Result<string>>
+  }
+  // 教案模板（用户自定义）
+  lessonPlanTemplate: {
+    list: () => Promise<Result<LessonPlanTemplateRecord[]>>
+    create: (input: LessonPlanTemplateRecordInput) => Promise<Result<LessonPlanTemplateRecord>>
+    update: (id: ID, input: Partial<LessonPlanTemplateRecordInput>) => Promise<Result<LessonPlanTemplateRecord>>
+    remove: (id: ID) => Promise<Result<void>>
   }
   // 待办
   todo: {

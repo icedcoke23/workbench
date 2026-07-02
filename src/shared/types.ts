@@ -348,6 +348,34 @@ export interface FeedbackTemplateInput {
   sortOrder?: number
 }
 
+// ============ 教案模板（用户自定义） ============
+/**
+ * 用户自定义教案模板。与静态 LESSON_PLAN_TEMPLATES 结构对齐，
+ * category 固定为 'custom'（内置模板仍由静态数据提供，不入库）。
+ */
+export interface LessonPlanTemplateRecord {
+  id: ID
+  name: string
+  category: 'custom'
+  description: string | null
+  durationMinutes: number | null
+  objectives: string | null
+  keyPoints: string | null
+  preparation: string | null
+  process: string | null
+  createdAt: string
+  updatedAt: string
+}
+export interface LessonPlanTemplateRecordInput {
+  name: string
+  description?: string | null
+  durationMinutes?: number | null
+  objectives?: string | null
+  keyPoints?: string | null
+  preparation?: string | null
+  process?: string | null
+}
+
 // ============ 学生学习历史 ============
 export interface StudentHistory {
   student: Student

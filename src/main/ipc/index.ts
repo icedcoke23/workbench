@@ -6,6 +6,7 @@ import * as classRepo from '../database/repositories/classes'
 import * as lessonRepo from '../database/repositories/lessons'
 import * as ideaRepo from '../database/repositories/ideas'
 import * as lessonPlanRepo from '../database/repositories/lesson-plans'
+import * as lessonPlanTemplateRepo from '../database/repositories/lesson-plan-templates'
 import * as todoRepo from '../database/repositories/todos'
 import * as resourceRepo from '../database/repositories/resources'
 import * as feedbackRepo from '../database/repositories/feedbacks'
@@ -111,6 +112,18 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       win?.webContents.send('lessonPlan:reviewChunk', '[DONE]')
       return full
     })
+  )
+
+  // ============ 教案模板（用户自定义） ============
+  ipcMain.handle('lessonPlanTemplate:list', () => tryRun(() => lessonPlanTemplateRepo.list()))
+  ipcMain.handle('lessonPlanTemplate:create', (_e, input) =>
+    tryRun(() => lessonPlanTemplateRepo.create(input))
+  )
+  ipcMain.handle('lessonPlanTemplate:update', (_e, id, input) =>
+    tryRun(() => lessonPlanTemplateRepo.update(id, input))
+  )
+  ipcMain.handle('lessonPlanTemplate:remove', (_e, id) =>
+    tryRun(() => lessonPlanTemplateRepo.remove(id))
   )
 
   // ============ 待办 ============

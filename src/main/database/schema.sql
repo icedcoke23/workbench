@@ -209,3 +209,19 @@ CREATE TABLE IF NOT EXISTS feedback_templates (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_fb_templates_category ON feedback_templates(category);
+
+-- 教案模板（用户自定义；内置模板仍由静态数据提供）
+CREATE TABLE IF NOT EXISTS lesson_plan_templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  category TEXT DEFAULT 'custom',
+  description TEXT,
+  duration_minutes INTEGER,
+  objectives TEXT,
+  key_points TEXT,
+  preparation TEXT,
+  process TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_lp_templates_category ON lesson_plan_templates(category);
