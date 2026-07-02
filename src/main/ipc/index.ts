@@ -129,6 +129,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('lessonPlan:prepOverview', () =>
     tryRun(() => lessonPlanService.buildPrepOverview())
   )
+  ipcMain.handle('lessonPlan:readinessTrend', (_e, days?: number) =>
+    tryRun(() => lessonPlanService.listReadinessTrend(days))
+  )
   ipcMain.handle('lessonPlan:review', async (e, planId) =>
     tryRunAsync(async () => {
       const win = BrowserWindow.fromWebContents(e.sender) ?? getMainWindow()

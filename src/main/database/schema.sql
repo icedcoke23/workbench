@@ -261,3 +261,18 @@ CREATE TABLE IF NOT EXISTS lesson_plan_templates (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_lp_templates_category ON lesson_plan_templates(category);
+
+-- 备课就绪度日快照（G20 趋势追踪）
+-- 每日最多一条（snapshot_date UNIQUE），看板加载时幂等 upsert 当日快照，
+-- 供 PrepView 绘制近 N 天就绪率趋势曲线，反映备课质量长期演变。
+CREATE TABLE IF NOT EXISTS prep_readiness_snapshots (
+  id TEXT PRIMARY KEY,
+  snapshot_date TEXT NOT NULL UNIQUE,
+  total_versions INTEGER NOT NULL DEFAULT 0,
+  draft INTEGER NOT NULL DEFAULT 0,
+  partial INTEGER NOT NULL DEFAULT 0,
+  ready INTEGER NOT NULL DEFAULT 0,
+  readiness_pct INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_prep_snapshots_date ON prep_readiness_snapshots(snapshot_date);

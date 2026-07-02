@@ -13,7 +13,7 @@ import * as ideaRepo from '../database/repositories/ideas'
 import * as lessonPlanRepo from '../database/repositories/lesson-plans'
 import * as lessonRepo from '../database/repositories/lessons'
 import * as docRepo from '../database/repositories/docs'
-import { db } from '../database/db'
+import { db, uuid } from '../database/db'
 import { app, dialog } from 'electron'
 import { writeFileSync } from 'fs'
 import { join } from 'path'
@@ -23,6 +23,7 @@ import type {
   PlanResource,
   PrepOverview,
   PrepOverviewLesson,
+  PrepReadinessSnapshot,
   PrepStage
 } from '@shared/types'
 import { computePlanReadiness } from '@shared/plan-readiness'
@@ -445,34 +446,34 @@ export async function exportPdf(planId: string): Promise<string | null> {
 /** 近期未备课课次的时间窗口（天） */
 const PREP_OVERVIEW_DAYS = 7
 
+/** 趋势快照默认回溯天数 */
+const READINESS_TREND_DAYS = 30
+
 /**
- * 构建备课进度看板数据：
- * - 聚合统计全部版本数、已编写教案数、关键章节齐全数（粗粒度，向后兼容）
- * - G16: 拉取全部教案 + 各教案关联素材数，用共享 computePlanReadiness 计算就绪等级，
- *   聚合为 draft/partial/ready 三档分布，与编辑器/卡片/授课侧的就绪定义完全一致
- * - 列出近期（默认 7 天）待上课且备课未就绪的课次，按开始时间升序
- *
- * 课次的 prepStage 已由 lessons repo 的 SQL JOIN 派生，此处直接读取，
- * 无需逐课次查询教案，避免 N+1。就绪等级在主进程 TS 计算（个人工作台数据量小，
- * 无需下沉 SQL），保证规则单一来源。
+ * 共享的就绪分布计算（G20 抽出，供 buildPrepOverview 与日快照复用，保证口径一致）。
+ * 拉取全部教案 + 各教案关联素材数，用共享 computePlanReadiness 定级后聚合为
+ * draft/partial/ready 三档。无教案的版本直接归入 draft。
  */
-export function buildPrepOverview(): PrepOverview {
+function computeReadinessBreakdown(): {
+  totalVersions: number
+  versionsWithPlan: number
+  draft: number
+  partial: number
+  ready: number
+  readinessPct: number
+} {
   const row = db()
     .prepare(
       `SELECT
          (SELECT COUNT(*) FROM idea_versions) AS total_versions,
-         (SELECT COUNT(*) FROM lesson_plans) AS versions_with_plan,
-         (SELECT COUNT(*) FROM lesson_plans
-          WHERE objectives IS NOT NULL AND objectives != ''
-            AND process IS NOT NULL AND process != '') AS versions_complete`
+         (SELECT COUNT(*) FROM lesson_plans) AS versions_with_plan
+       `
     )
-    .get() as { total_versions: number; versions_with_plan: number; versions_complete: number }
+    .get() as { total_versions: number; versions_with_plan: number }
 
   const totalVersions = row.total_versions || 0
   const versionsWithPlan = row.versions_with_plan || 0
-  const versionsWithCompletePlan = row.versions_complete || 0
 
-  // G16: 拉取全部教案 + 关联素材数，按就绪等级聚合
   const plans = db()
     .prepare(
       `SELECT lp.objectives, lp.key_points, lp.preparation, lp.process, lp.duration_minutes,
@@ -506,6 +507,42 @@ export function buildPrepOverview(): PrepOverview {
     else draft++
   }
   const readinessPct = totalVersions === 0 ? 0 : Math.round((ready / totalVersions) * 100)
+  return { totalVersions, versionsWithPlan, draft, partial, ready, readinessPct }
+}
+
+/**
+ * 构建备课进度看板数据：
+ * - 聚合统计全部版本数、已编写教案数、关键章节齐全数（粗粒度，向后兼容）
+ * - G16: 用共享 computeReadinessBreakdown 计算就绪等级分布，
+ *   与编辑器/卡片/授课侧的就绪定义完全一致
+ * - G20: 顺带幂等记录当日就绪快照（snapshot_date 唯一，同日覆盖为最新状态），
+ *   供趋势查询绘制近 N 天就绪率曲线
+ * - 列出近期（默认 7 天）待上课且备课未就绪的课次，按开始时间升序
+ *
+ * 课次的 prepStage 已由 lessons repo 的 SQL JOIN 派生，此处直接读取，
+ * 无需逐课次查询教案，避免 N+1。就绪等级在主进程 TS 计算（个人工作台数据量小，
+ * 无需下沉 SQL），保证规则单一来源。
+ */
+export function buildPrepOverview(): PrepOverview {
+  const breakdown = computeReadinessBreakdown()
+  const { totalVersions, versionsWithPlan, draft, partial, ready, readinessPct } = breakdown
+
+  // 粗粒度「关键章节齐全」计数（目标+过程非空），向后兼容旧字段
+  const versionsCompleteRow = db()
+    .prepare(
+      `SELECT COUNT(*) AS n FROM lesson_plans
+       WHERE objectives IS NOT NULL AND objectives != ''
+         AND process IS NOT NULL AND process != ''`
+    )
+    .get() as { n: number }
+  const versionsWithCompletePlan = versionsCompleteRow.n || 0
+
+  // G20: 幂等记录当日快照（失败不阻塞看板渲染）
+  try {
+    recordReadinessSnapshot(breakdown)
+  } catch (e) {
+    console.warn('记录就绪快照失败', e)
+  }
 
   const now = new Date()
   const horizon = new Date(now.getTime() + PREP_OVERVIEW_DAYS * 24 * 3_600_000)
@@ -536,4 +573,90 @@ export function buildPrepOverview(): PrepOverview {
     readinessBreakdown: { draft, partial, ready },
     upcomingUnprepared
   }
+}
+
+/**
+ * 将当日就绪分布幂等写入 prep_readiness_snapshots（G20）。
+ * snapshot_date 为本地时区 YYYY-MM-DD，同日 upsert 覆盖为最新状态，
+ * 故无论看板刷新多少次，每日只保留一条反映当日末态的快照。
+ */
+function recordReadinessSnapshot(b: {
+  totalVersions: number
+  draft: number
+  partial: number
+  ready: number
+  readinessPct: number
+}): void {
+  const today = new Date()
+  const snapshotDate =
+    `${today.getFullYear()}-` +
+    `${String(today.getMonth() + 1).padStart(2, '0')}-` +
+    `${String(today.getDate()).padStart(2, '0')}`
+  db()
+    .prepare(
+      `INSERT INTO prep_readiness_snapshots
+         (id, snapshot_date, total_versions, draft, partial, ready, readiness_pct)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(snapshot_date) DO UPDATE SET
+         total_versions = excluded.total_versions,
+         draft = excluded.draft,
+         partial = excluded.partial,
+         ready = excluded.ready,
+         readiness_pct = excluded.readiness_pct`
+    )
+    .run(
+      uuid(),
+      snapshotDate,
+      b.totalVersions,
+      b.draft,
+      b.partial,
+      b.ready,
+      b.readinessPct
+    )
+}
+
+interface SnapshotRow {
+  id: string
+  snapshot_date: string
+  total_versions: number
+  draft: number
+  partial: number
+  ready: number
+  readiness_pct: number
+  created_at: string
+}
+
+function mapSnapshotRow(r: SnapshotRow): PrepReadinessSnapshot {
+  return {
+    id: r.id,
+    snapshotDate: r.snapshot_date,
+    totalVersions: r.total_versions,
+    draft: r.draft,
+    partial: r.partial,
+    ready: r.ready,
+    readinessPct: r.readiness_pct,
+    createdAt: r.created_at
+  }
+}
+
+/**
+ * 列出近 N 天的就绪度日快照（G20，按日期升序，供前端绘制趋势曲线）。
+ * 默认回溯 30 天。返回实际有记录的日期，缺失日期由前端按需补零/插值。
+ */
+export function listReadinessTrend(days: number = READINESS_TREND_DAYS): PrepReadinessSnapshot[] {
+  const since = new Date()
+  since.setDate(since.getDate() - days)
+  const sinceDate =
+    `${since.getFullYear()}-` +
+    `${String(since.getMonth() + 1).padStart(2, '0')}-` +
+    `${String(since.getDate()).padStart(2, '0')}`
+  const rows = db()
+    .prepare(
+      `SELECT id, snapshot_date, total_versions, draft, partial, ready, readiness_pct, created_at
+       FROM prep_readiness_snapshots
+       WHERE snapshot_date >= ?
+       ORDER BY snapshot_date ASC`
+    )
+    .all(sinceDate) as SnapshotRow[]
+  return rows.map(mapSnapshotRow)
 }

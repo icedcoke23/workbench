@@ -26,6 +26,7 @@ import type {
   MenuAction,
   PageQuery,
   PrepOverview,
+  PrepReadinessSnapshot,
   Resource,
   ResourceInput,
   Result,
@@ -51,7 +52,7 @@ export const API_METHODS: Record<string, string[]> = {
   class: ['list', 'get', 'create', 'update', 'remove', 'members', 'addMembers', 'removeMember'],
   lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'setReflection', 'assess', 'records', 'score', 'pick'],
   idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'updateVersion', 'removeVersion', 'getVersionMeta'],
-  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'clone', 'generateDraft', 'exportMarkdown', 'exportPdf', 'prepOverview', 'review', 'listResources', 'attachResource', 'detachResource'],
+  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'clone', 'generateDraft', 'exportMarkdown', 'exportPdf', 'prepOverview', 'readinessTrend', 'review', 'listResources', 'attachResource', 'detachResource'],
   lessonPlanTemplate: ['list', 'create', 'update', 'remove'],
   todo: ['list', 'create', 'update', 'remove', 'regenerate'],
   resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags', 'readFile'],
@@ -135,6 +136,7 @@ export interface WorkbenchAPI {
     exportMarkdown: (id: ID) => Promise<Result<string | null>>
     exportPdf: (id: ID) => Promise<Result<string | null>>
     prepOverview: () => Promise<Result<PrepOverview>>
+    readinessTrend: (days?: number) => Promise<Result<PrepReadinessSnapshot[]>>
     review: (planId: ID) => Promise<Result<string>>
   }
   // 教案模板（用户自定义）

@@ -216,6 +216,59 @@
             </div>
           </div>
 
+          <!-- G20: 就绪率趋势 sparkline -->
+          <div
+            v-if="readinessTrend.length >= 2"
+            class="overview-trend"
+          >
+            <div class="overview-trend-header">
+              <span class="overview-trend-title"><LineChartOutlined /> 近 {{ readinessTrend.length }} 天就绪率趋势</span>
+              <span class="overview-trend-summary">
+                <span class="ts-item">最新 <b>{{ trendSummary.latest }}%</b></span>
+                <span class="ts-item">均值 <b>{{ trendSummary.avg }}%</b></span>
+                <span
+                  class="ts-item"
+                  :class="{ 'ts-up': (trendSummary.delta ?? 0) >= 0, 'ts-down': (trendSummary.delta ?? 0) < 0 }"
+                >
+                  较首日 {{ (trendSummary.delta ?? 0) >= 0 ? '+' : '' }}{{ trendSummary.delta }}%
+                </span>
+              </span>
+            </div>
+            <svg
+              class="overview-trend-svg"
+              :viewBox="`0 0 ${TREND_W} ${TREND_H}`"
+              preserveAspectRatio="none"
+            >
+              <defs>
+                <linearGradient id="trendArea" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#52c41a" stop-opacity="0.25" />
+                  <stop offset="100%" stop-color="#52c41a" stop-opacity="0" />
+                </linearGradient>
+              </defs>
+              <path :d="trendSparkline.areaPath" fill="url(#trendArea)" />
+              <path
+                :d="trendSparkline.linePath"
+                fill="none"
+                stroke="#52c41a"
+                stroke-width="1.5"
+                stroke-linejoin="round"
+                stroke-linecap="round"
+              />
+              <circle
+                v-for="(p, i) in trendSparkline.points"
+                :key="i"
+                :cx="p.x"
+                :cy="p.y"
+                r="2"
+                :fill="i === trendSparkline.points.length - 1 ? '#52c41a' : '#fff'"
+                :stroke="'#52c41a'"
+                :stroke-width="1"
+              >
+                <title>{{ p.date }}：{{ p.pct }}%</title>
+              </circle>
+            </svg>
+          </div>
+
           <div
             v-if="prepOverview.upcomingUnprepared.length > 0"
             class="overview-backlog"
@@ -1354,6 +1407,7 @@ import {
   EyeOutlined,
   FormOutlined,
   ScheduleOutlined,
+  LineChartOutlined,
   ThunderboltOutlined,
   DownloadOutlined,
   CopyOutlined,
@@ -1404,6 +1458,7 @@ import type {
   LessonPlanTemplateRecord,
   LessonPlanTemplateRecordInput,
   PrepOverview,
+  PrepReadinessSnapshot,
   PrepStage,
   ScratchSavePayload,
   VersionMeta,
@@ -1500,6 +1555,9 @@ const planSubjectOptions = ref<Array<{ label: string; value: string }>>([])
 // 备课进度看板（G6-4）
 const prepOverview = ref<PrepOverview | null>(null)
 const prepOverviewLoading = ref(false)
+// G20: 就绪度趋势日快照（近 30 天），看板加载后绘制趋势曲线
+const readinessTrend = ref<PrepReadinessSnapshot[]>([])
+const readinessTrendLoading = ref(false)
 const planEditorVisible = ref(false)
 const planEditorIsEdit = ref(false)
 const planEditorVersionHasPlan = ref(false)
@@ -1755,7 +1813,22 @@ async function loadPlanFilterOptions(): Promise<void> {
 async function loadPrepOverview(): Promise<void> {
   prepOverviewLoading.value = true
   try {
+    // 先加载看板：buildPrepOverview 会幂等记录当日就绪快照
     prepOverview.value = await call(window.api.lessonPlan.prepOverview())
+    // 再加载趋势（包含刚写入的当日快照），并行不阻塞看板渲染
+    readinessTrendLoading.value = true
+    call(window.api.lessonPlan.readinessTrend(30))
+      .then((trend) => {
+        readinessTrend.value = trend
+      })
+      .catch((e) => {
+        // 趋势加载失败不影响看板主功能
+        console.warn('加载就绪趋势失败', e)
+        readinessTrend.value = []
+      })
+      .finally(() => {
+        readinessTrendLoading.value = false
+      })
   } catch (e) {
     message.error(`加载备课看板失败：${String(e instanceof Error ? e.message : e)}`)
   } finally {
@@ -1776,6 +1849,36 @@ function overviewStageTag(stage: PrepStage): { text: string; color: string } {
       return { text: '就绪', color: 'green' }
   }
 }
+
+// ============ G20: 就绪度趋势 sparkline ============
+const TREND_W = 280
+const TREND_H = 48
+/** SVG 折线点坐标（含 area 路径），仅 ≥2 个快照时有意义 */
+const trendSparkline = computed<{ linePath: string; areaPath: string; points: Array<{ x: number; y: number; pct: number; date: string }> }>(() => {
+  const snaps = readinessTrend.value
+  const n = snaps.length
+  if (n === 0) return { linePath: '', areaPath: '', points: [] }
+  const pad = 4
+  const w = TREND_W - pad * 2
+  const h = TREND_H - pad * 2
+  const pts = snaps.map((s, i) => {
+    const x = pad + (n === 1 ? w / 2 : (i / (n - 1)) * w)
+    const y = pad + (1 - s.readinessPct / 100) * h
+    return { x, y, pct: s.readinessPct, date: s.snapshotDate }
+  })
+  const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
+  const areaPath = `${linePath} L${pts[pts.length - 1].x.toFixed(1)},${(pad + h).toFixed(1)} L${pts[0].x.toFixed(1)},${(pad + h).toFixed(1)} Z`
+  return { linePath, areaPath, points: pts }
+})
+/** 趋势摘要：最新值 / 区间均值 / 较首日变化 */
+const trendSummary = computed<{ latest: number | null; avg: number | null; delta: number | null }>(() => {
+  const snaps = readinessTrend.value
+  if (snaps.length === 0) return { latest: null, avg: null, delta: null }
+  const latest = snaps[snaps.length - 1].readinessPct
+  const avg = Math.round(snaps.reduce((s, x) => s + x.readinessPct, 0) / snaps.length)
+  const delta = latest - snaps[0].readinessPct
+  return { latest, avg, delta }
+})
 
 function fmtOverviewTime(iso: string): string {
   return dayjs(iso).format('MM-DD HH:mm')
@@ -3820,6 +3923,46 @@ onUnmounted(() => {
 }
 .overview-breakdown-legend .dot-ready {
   background: #52c41a;
+}
+/* G20: 就绪率趋势 sparkline */
+.overview-trend {
+  margin-top: 14px;
+  border-top: 1px dashed #e5e7eb;
+  padding-top: 10px;
+}
+.overview-trend-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.overview-trend-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+.overview-trend-summary {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.overview-trend-summary .ts-item b {
+  color: #1f2937;
+  margin-left: 2px;
+}
+.overview-trend-summary .ts-up {
+  color: #3f8600;
+}
+.overview-trend-summary .ts-down {
+  color: #cf1322;
+}
+.overview-trend-svg {
+  width: 100%;
+  height: 48px;
+  display: block;
 }
 .overview-backlog {
   margin-top: 14px;

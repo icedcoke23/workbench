@@ -241,6 +241,23 @@ export interface PrepOverviewLesson {
   ideaVersionId?: string | null
   prepStage: PrepStage
 }
+
+/**
+ * 备课就绪度日快照（G20 趋势追踪）。
+ * 每日最多一条（snapshot_date 唯一），记录当日看板的就绪分布，
+ * 供前端绘制近 N 天就绪率趋势曲线。
+ */
+export interface PrepReadinessSnapshot {
+  id: ID
+  /** 快照日期，YYYY-MM-DD（本地时区） */
+  snapshotDate: string
+  totalVersions: number
+  draft: number
+  partial: number
+  ready: number
+  readinessPct: number
+  createdAt: string
+}
 export interface LessonInput {
   classId: ID
   startTime: string
