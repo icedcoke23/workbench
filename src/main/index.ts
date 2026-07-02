@@ -102,6 +102,23 @@ app.whenReady().then(() => {
     log.error('app', '生成待办失败', { error: e })
   }
 
+  // G26: 每小时定时刷新自动待办，覆盖应用长时间运行场景：
+  // - 新排进 24h 备课窗口的课次能及时生成 prep 待办
+  // - 已结课未发反馈/未填反思的课次能及时生成对应待办
+  // - 已就绪/已处理的课次能及时清除旧待办
+  // syncAutoTodos 幂等，重复调用安全。
+  const AUTO_TODO_REFRESH_INTERVAL_MS = 60 * 60 * 1000
+  const todoTimer = setInterval(() => {
+    try {
+      regenerateAutoTodos()
+    } catch (e) {
+      log.warn('app', '定时刷新自动待办失败', { error: e })
+    }
+  }, AUTO_TODO_REFRESH_INTERVAL_MS)
+  // 防止定时器阻止应用退出
+  todoTimer.unref?.()
+  app.on('before-quit', () => clearInterval(todoTimer))
+
   // 启动时若开启自动同步，后台执行一次
   const sync = getSync()
   if (sync.enabled && sync.autoSync) {

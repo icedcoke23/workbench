@@ -30,6 +30,19 @@ import { join } from 'path'
 
 /** 注册全部 IPC 处理器 */
 export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
+  /**
+   * G26: 在课次/教案/反馈等变更后增量刷新自动待办。
+   * syncAutoTodos 以 (type, refLessonId) 为业务键幂等 upsert，重复调用安全；
+   * 失败不阻塞业务操作，仅打 warning。
+   */
+  const refreshAutoTodos = (): void => {
+    try {
+      todoService.regenerateAutoTodos()
+    } catch (e) {
+      console.warn('刷新自动待办失败', e)
+    }
+  }
+
   // ============ 学生 ============
   ipcMain.handle('student:list', (_e, q) => tryRun(() => studentRepo.list(q)))
   ipcMain.handle('student:get', (_e, id) => tryRun(() => studentRepo.get(id)))
@@ -51,12 +64,38 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // ============ 课次 ============
   ipcMain.handle('lesson:list', (_e, q) => tryRun(() => lessonRepo.list(q ?? {})))
   ipcMain.handle('lesson:get', (_e, id) => tryRun(() => lessonRepo.get(id)))
-  ipcMain.handle('lesson:create', (_e, input) => tryRun(() => lessonRepo.create(input)))
-  ipcMain.handle('lesson:update', (_e, id, input) => tryRun(() => lessonRepo.update(id, input)))
-  ipcMain.handle('lesson:remove', (_e, id) => tryRun(() => lessonRepo.remove(id)))
-  ipcMain.handle('lesson:finish', (_e, id) => tryRun(() => lessonRepo.finish(id)))
+  ipcMain.handle('lesson:create', (_e, input) =>
+    tryRun(() => {
+      const r = lessonRepo.create(input)
+      refreshAutoTodos()
+      return r
+    })
+  )
+  ipcMain.handle('lesson:update', (_e, id, input) =>
+    tryRun(() => {
+      const r = lessonRepo.update(id, input)
+      refreshAutoTodos()
+      return r
+    })
+  )
+  ipcMain.handle('lesson:remove', (_e, id) =>
+    tryRun(() => {
+      lessonRepo.remove(id)
+      refreshAutoTodos()
+    })
+  )
+  ipcMain.handle('lesson:finish', (_e, id) =>
+    tryRun(() => {
+      const r = lessonRepo.finish(id)
+      refreshAutoTodos()
+      return r
+    })
+  )
   ipcMain.handle('lesson:setReflection', (_e, id, text) =>
-    tryRun(() => lessonRepo.setReflection(id, text))
+    tryRun(() => {
+      lessonRepo.setReflection(id, text)
+      refreshAutoTodos()
+    })
   )
   ipcMain.handle('lesson:assess', async (e, lessonId) =>
     tryRunAsync(async () => {
@@ -95,8 +134,19 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('lessonPlan:list', (_e, q) => tryRun(() => lessonPlanRepo.list(q)))
   ipcMain.handle('lessonPlan:get', (_e, id) => tryRun(() => lessonPlanRepo.get(id)))
   ipcMain.handle('lessonPlan:getByVersion', (_e, versionId) => tryRun(() => lessonPlanRepo.getByVersion(versionId)))
-  ipcMain.handle('lessonPlan:upsert', (_e, input) => tryRun(() => lessonPlanRepo.upsert(input)))
-  ipcMain.handle('lessonPlan:remove', (_e, id) => tryRun(() => lessonPlanRepo.remove(id)))
+  ipcMain.handle('lessonPlan:upsert', (_e, input) =>
+    tryRun(() => {
+      const r = lessonPlanRepo.upsert(input)
+      refreshAutoTodos()
+      return r
+    })
+  )
+  ipcMain.handle('lessonPlan:remove', (_e, id) =>
+    tryRun(() => {
+      lessonPlanRepo.remove(id)
+      refreshAutoTodos()
+    })
+  )
   ipcMain.handle('lessonPlan:clone', (_e, sourcePlanId, input) =>
     tryRun(() => lessonPlanRepo.clonePlan(sourcePlanId, input))
   )
@@ -195,6 +245,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       })
       win?.webContents.send('feedback:chunk', '[DONE]')
       lessonRepo.setFeedbackSent(lessonId)
+      refreshAutoTodos()
       return full
     })
   )
