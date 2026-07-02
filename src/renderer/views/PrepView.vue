@@ -925,13 +925,21 @@
         </div>
         <div v-if="planReviewing || planReviewText" class="plan-review-panel">
           <div class="plan-review-label">
-            AI 优化建议：
-            <a-button
-              v-if="planReviewText && !planReviewing"
-              size="small"
-              type="link"
-              @click="planReviewText = ''"
-            >清空</a-button>
+            <span>AI 优化建议：</span>
+            <span class="plan-review-actions">
+              <a-button
+                v-if="reviewDemoText && !planReviewing"
+                size="small"
+                type="link"
+                @click="applyReviewDemoToProcess"
+              >应用示范到教学过程</a-button>
+              <a-button
+                v-if="planReviewText && !planReviewing"
+                size="small"
+                type="link"
+                @click="planReviewText = ''"
+              >清空</a-button>
+            </span>
           </div>
           <pre class="plan-review-text">{{ planReviewText || '正在生成…' }}</pre>
         </div>
@@ -1936,6 +1944,36 @@ async function reviewCurrentPlan(): Promise<void> {
   }
 }
 
+/**
+ * 从 AI 优化建议文本中提取「重点修订示范」章节下的引用块内容，
+ * 供一键追加到「教学过程」。提取失败时返回空字符串。
+ */
+const reviewDemoText = computed(() => {
+  const text = planReviewText.value
+  if (!text) return ''
+  // 定位「重点修订示范」标题，取其后到下一个 ### 或文末之间的引用行
+  const m = text.match(/###\s*重点修订示范[\s\S]*?(?=###|$)/)
+  if (!m) return ''
+  const block = m[0]
+  const quoteLines = block
+    .split('\n')
+    .filter((l) => l.trim().startsWith('>'))
+    .map((l) => l.replace(/^\s*>\s?/, ''))
+  return quoteLines.join('\n').trim()
+})
+
+/** 将 AI 示范文本追加到「教学过程」末尾（带分隔标题，便于人工再调整） */
+function applyReviewDemoToProcess(): void {
+  const demo = reviewDemoText.value
+  if (!demo) {
+    message.warning('未识别到可应用的示范文本')
+    return
+  }
+  const block = `\n\n### AI 建议修订示范（待人工调整）\n${demo}`
+  planForm.process = planForm.process ? `${planForm.process}${block}` : block
+  message.success('已追加到「教学过程」末尾，请检查并调整')
+}
+
 async function removePlan(id: string): Promise<void> {
   try {
     await call(window.api.lessonPlan.remove(id))
@@ -2859,6 +2897,11 @@ onUnmounted(() => {
   font-weight: 600;
   color: #874d00;
   margin-bottom: 4px;
+}
+.plan-review-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .plan-review-text {
   margin: 0;
