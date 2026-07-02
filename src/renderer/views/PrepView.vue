@@ -119,6 +119,82 @@
           </a-space>
         </div>
 
+        <!-- 备课进度看板 -->
+        <a-card
+          v-if="prepOverview"
+          class="prep-overview-card"
+          size="small"
+          :loading="prepOverviewLoading"
+        >
+          <a-row :gutter="16">
+            <a-col :xs="24" :sm="12" :md="6">
+              <a-statistic title="作品版本" :value="prepOverview.totalVersions" />
+            </a-col>
+            <a-col :xs="24" :sm="12" :md="6">
+              <a-statistic
+                title="已写教案"
+                :value="prepOverview.versionsWithPlan"
+                :suffix="`/ ${prepOverview.totalVersions}`"
+              />
+            </a-col>
+            <a-col :xs="24" :sm="12" :md="6">
+              <a-statistic
+                title="备课就绪"
+                :value="prepOverview.versionsWithCompletePlan"
+                :value-style="{ color: prepOverview.readinessPct >= 80 ? '#3f8600' : prepOverview.readinessPct >= 50 ? '#d48806' : '#cf1322' }"
+                :suffix="`/ ${prepOverview.totalVersions}`"
+              />
+            </a-col>
+            <a-col :xs="24" :sm="12" :md="6">
+              <div class="overview-readiness">
+                <span class="overview-readiness-label">就绪率</span>
+                <a-progress
+                  type="circle"
+                  :percent="prepOverview.readinessPct"
+                  :width="56"
+                  :stroke-color="prepOverview.readinessPct >= 80 ? '#52c41a' : prepOverview.readinessPct >= 50 ? '#faad14' : '#ff4d4f'"
+                />
+              </div>
+            </a-col>
+          </a-row>
+
+          <div
+            v-if="prepOverview.upcomingUnprepared.length > 0"
+            class="overview-backlog"
+          >
+            <div class="overview-backlog-title">
+              <ScheduleOutlined /> 近 7 天待备课课次（{{ prepOverview.upcomingUnprepared.length }}）
+            </div>
+            <div class="overview-backlog-list">
+              <div
+                v-for="item in prepOverview.upcomingUnprepared.slice(0, 8)"
+                :key="item.lessonId"
+                class="overview-backlog-item"
+                @click="item.ideaVersionId && openPlanForVersion(item.ideaVersionId)"
+              >
+                <span class="ob-time">{{ fmtOverviewTime(item.startTime) }}</span>
+                <span class="ob-class">{{ item.className || item.subject || '课程' }}</span>
+                <a-tag :color="overviewStageTag(item.prepStage).color" size="small">
+                  {{ overviewStageTag(item.prepStage).text }}
+                </a-tag>
+                <a-tag v-if="item.ideaTitle" color="purple" size="small">{{ item.ideaTitle }}</a-tag>
+                <EditOutlined v-if="item.ideaVersionId" class="ob-edit-icon" />
+              </div>
+            </div>
+            <div v-if="prepOverview.upcomingUnprepared.length > 8" class="overview-backlog-more">
+              还有 {{ prepOverview.upcomingUnprepared.length - 8 }} 节待备课课次…
+            </div>
+          </div>
+          <a-alert
+            v-else
+            type="success"
+            show-icon
+            message="近期课次备课就绪"
+            description="未来 7 天内没有备课未完成的待上课课次。"
+            style="margin-top: 12px"
+          />
+        </a-card>
+
         <a-alert
           type="info"
           show-icon
@@ -936,6 +1012,8 @@ import type {
   Lesson,
   LessonPlan,
   LessonPlanInput,
+  PrepOverview,
+  PrepStage,
   ScratchSavePayload,
   VersionMeta,
   DocLinkWithLesson
@@ -1021,6 +1099,9 @@ async function removeVersion(versionId: string): Promise<void> {
 // ============ 教案 ============
 const plans = ref<LessonPlan[]>([])
 const plansLoading = ref(false)
+// 备课进度看板（G6-4）
+const prepOverview = ref<PrepOverview | null>(null)
+const prepOverviewLoading = ref(false)
 const planEditorVisible = ref(false)
 const planEditorIsEdit = ref(false)
 const planEditorVersionHasPlan = ref(false)
@@ -1097,6 +1178,36 @@ async function loadPlans(): Promise<void> {
   } finally {
     plansLoading.value = false
   }
+}
+
+// ============ 备课进度看板（G6-4） ============
+async function loadPrepOverview(): Promise<void> {
+  prepOverviewLoading.value = true
+  try {
+    prepOverview.value = await call(window.api.lessonPlan.prepOverview())
+  } catch (e) {
+    message.error(`加载备课看板失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    prepOverviewLoading.value = false
+  }
+}
+
+/** 看板待办列表中备课阶段 → 标签文本/颜色 */
+function overviewStageTag(stage: PrepStage): { text: string; color: string } {
+  switch (stage) {
+    case 'no-version':
+      return { text: '待关联版本', color: 'volcano' }
+    case 'no-plan':
+      return { text: '待写教案', color: 'orange' }
+    case 'plan-incomplete':
+      return { text: '待完善教案', color: 'gold' }
+    case 'ready':
+      return { text: '就绪', color: 'green' }
+  }
+}
+
+function fmtOverviewTime(iso: string): string {
+  return dayjs(iso).format('MM-DD HH:mm')
 }
 
 /** 计算教案已填写的章节标签 */
@@ -1332,6 +1443,7 @@ async function submitPlan(): Promise<void> {
     message.success(planEditorIsEdit.value ? '教案已保存' : '教案已创建')
     planEditorVisible.value = false
     await loadPlans()
+    await loadPrepOverview()
   } catch (e) {
     message.error(`保存失败：${String(e instanceof Error ? e.message : e)}`)
   } finally {
@@ -1441,6 +1553,7 @@ async function removePlan(id: string): Promise<void> {
     await call(window.api.lessonPlan.remove(id))
     message.success('已删除教案')
     await loadPlans()
+    await loadPrepOverview()
   } catch (e) {
     message.error(`删除失败：${String(e instanceof Error ? e.message : e)}`)
   }
@@ -1980,6 +2093,7 @@ onMounted(() => {
   loadLessons()
   loadDocLinks()
   loadPlans()
+  loadPrepOverview()
 
   const subscribe = window.events['scratch:save-request'] as unknown as SubscribeSave
   offScratchSave = subscribe((payload) => {
@@ -2009,6 +2123,7 @@ onMounted(() => {
     loadLessons()
     loadDocLinks()
     loadPlans()
+    loadPrepOverview()
   })
   // 订阅全局新增事件：触发新建点子弹窗
   offNewItem = subscribeNewItem(openNewIdeaModal, 'prep')
@@ -2351,5 +2466,73 @@ onUnmounted(() => {
 .rp-tags {
   font-size: 12px;
   color: #9ca3af;
+}
+
+/* 备课进度看板 */
+.prep-overview-card {
+  margin-bottom: 16px;
+  margin-top: 12px;
+}
+.overview-readiness {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.overview-readiness-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+.overview-backlog {
+  margin-top: 14px;
+  border-top: 1px dashed #e5e7eb;
+  padding-top: 10px;
+}
+.overview-backlog-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 8px;
+}
+.overview-backlog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.overview-backlog-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.overview-backlog-item:hover {
+  background: #f5f7ff;
+}
+.ob-time {
+  font-size: 12px;
+  font-weight: 600;
+  color: #4f46e5;
+  min-width: 92px;
+}
+.ob-class {
+  font-size: 13px;
+  color: #1f2937;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ob-edit-icon {
+  font-size: 12px;
+  color: #9ca3af;
+}
+.overview-backlog-more {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 6px;
+  text-align: center;
 }
 </style>

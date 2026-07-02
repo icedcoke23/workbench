@@ -158,6 +158,31 @@ export interface Lesson {
   /** 备课进度阶段（list/get 时由 SQL JOIN 派生，可能为空表示未计算） */
   prepStage?: PrepStage
 }
+
+/** 备课进度看板：跨点子/版本的备课完成情况汇总 */
+export interface PrepOverview {
+  /** 全部作品版本数 */
+  totalVersions: number
+  /** 已编写教案的版本数 */
+  versionsWithPlan: number
+  /** 教案关键章节（目标+过程）齐全的版本数 */
+  versionsWithCompletePlan: number
+  /** 备课就绪率（0-100） */
+  readinessPct: number
+  /** 近期待上课且备课未就绪的课次（按开始时间升序） */
+  upcomingUnprepared: PrepOverviewLesson[]
+}
+
+export interface PrepOverviewLesson {
+  lessonId: ID
+  startTime: string
+  endTime: string
+  className?: string
+  subject?: string | null
+  ideaTitle?: string | null
+  ideaVersionId?: string | null
+  prepStage: PrepStage
+}
 export interface LessonInput {
   classId: ID
   startTime: string

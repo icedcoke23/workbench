@@ -3,10 +3,12 @@ import { buildLessonPlanDraftUserMessage, getLessonPlanSystemPrompt } from '../l
 import * as scratchService from './scratch'
 import * as ideaRepo from '../database/repositories/ideas'
 import * as lessonPlanRepo from '../database/repositories/lesson-plans'
+import * as lessonRepo from '../database/repositories/lessons'
+import { db } from '../database/db'
 import { app, dialog } from 'electron'
 import { writeFileSync } from 'fs'
 import { join } from 'path'
-import type { LessonPlan } from '@shared/types'
+import type { LessonPlan, PrepOverview, PrepOverviewLesson, PrepStage } from '@shared/types'
 
 /**
  * AI 辅助生成教案草稿（流式，通过 onChunk 回调推送增量）。
@@ -102,4 +104,63 @@ export async function exportMarkdown(planId: string): Promise<string | null> {
   if (res.canceled || !res.filePath) return null
   writeFileSync(res.filePath, md, 'utf8')
   return res.filePath
+}
+
+/** 近期未备课课次的时间窗口（天） */
+const PREP_OVERVIEW_DAYS = 7
+
+/**
+ * 构建备课进度看板数据：
+ * - 单条 SQL 聚合统计全部版本数、已编写教案数、关键章节齐全数，算出就绪率
+ * - 列出近期（默认 7 天）待上课且备课未就绪的课次，按开始时间升序
+ *
+ * 课次的 prepStage 已由 lessons repo 的 SQL JOIN 派生，此处直接读取，
+ * 无需逐课次查询教案，避免 N+1。
+ */
+export function buildPrepOverview(): PrepOverview {
+  const row = db()
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM idea_versions) AS total_versions,
+         (SELECT COUNT(*) FROM lesson_plans) AS versions_with_plan,
+         (SELECT COUNT(*) FROM lesson_plans
+          WHERE objectives IS NOT NULL AND objectives != ''
+            AND process IS NOT NULL AND process != '') AS versions_complete`
+    )
+    .get() as { total_versions: number; versions_with_plan: number; versions_complete: number }
+
+  const totalVersions = row.total_versions || 0
+  const versionsWithPlan = row.versions_with_plan || 0
+  const versionsWithCompletePlan = row.versions_complete || 0
+  const readinessPct =
+    totalVersions === 0 ? 0 : Math.round((versionsWithCompletePlan / totalVersions) * 100)
+
+  const now = new Date()
+  const horizon = new Date(now.getTime() + PREP_OVERVIEW_DAYS * 24 * 3_600_000)
+  const upcoming = lessonRepo.list({
+    from: now.toISOString(),
+    to: horizon.toISOString()
+  })
+
+  const upcomingUnprepared: PrepOverviewLesson[] = upcoming
+    .filter((l) => l.status === 'pending' && l.prepStage && l.prepStage !== 'ready')
+    .map((l) => ({
+      lessonId: l.id,
+      startTime: l.startTime,
+      endTime: l.endTime,
+      className: l.className,
+      subject: l.subject,
+      ideaTitle: l.ideaTitle,
+      ideaVersionId: l.ideaVersionId,
+      prepStage: l.prepStage as PrepStage
+    }))
+    .sort((a, b) => a.startTime.localeCompare(b.startTime))
+
+  return {
+    totalVersions,
+    versionsWithPlan,
+    versionsWithCompletePlan,
+    readinessPct,
+    upcomingUnprepared
+  }
 }
