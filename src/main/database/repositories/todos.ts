@@ -72,7 +72,7 @@ export function removeByLesson(lessonId: string, type: Todo['type']): void {
 
 /** 自动待办业务规格：以 (type, refLessonId) 为键 */
 export interface AutoTodoSpec {
-  type: 'prep' | 'feedback'
+  type: 'prep' | 'feedback' | 'reflection'
   refLessonId: string
   title: string
   dueAt: string | null
@@ -83,7 +83,7 @@ function autoTodoKey(type: string, refLessonId: string | null | undefined): stri
 }
 
 /**
- * 同步自动待办（备课/反馈），以 (type, refLessonId) 为业务键做增量同步：
+ * 同步自动待办（备课/反馈/反思），以 (type, refLessonId) 为业务键做增量同步：
  * - 已存在：仅更新 title/dueAt，**保留用户设置的 status**（避免每次重新生成丢失进度）
  * - 不存在：新建（status='todo'）
  * - 条件已不再成立的旧自动待办（不在 desired 列表中）：清理删除
@@ -92,7 +92,7 @@ function autoTodoKey(type: string, refLessonId: string | null | undefined): stri
 export function syncAutoTodos(desired: AutoTodoSpec[]): Todo[] {
   const tx = db().transaction(() => {
     const existing = (db()
-      .prepare(`SELECT * FROM todos WHERE type IN ('prep','feedback')`)
+      .prepare(`SELECT * FROM todos WHERE type IN ('prep','feedback','reflection')`)
       .all() as TodoRow[]).map(mapRow)
     const existingMap = new Map<string, Todo>()
     for (const t of existing) {

@@ -55,6 +55,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('lesson:update', (_e, id, input) => tryRun(() => lessonRepo.update(id, input)))
   ipcMain.handle('lesson:remove', (_e, id) => tryRun(() => lessonRepo.remove(id)))
   ipcMain.handle('lesson:finish', (_e, id) => tryRun(() => lessonRepo.finish(id)))
+  ipcMain.handle('lesson:setReflection', (_e, id, text) =>
+    tryRun(() => lessonRepo.setReflection(id, text))
+  )
   ipcMain.handle('lesson:records', (_e, lessonId) => tryRun(() => lessonRepo.records(lessonId)))
   ipcMain.handle('lesson:score', (_e, action) => tryRun(() => lessonRepo.score(action)))
   ipcMain.handle('lesson:pick', (_e, lessonId) =>

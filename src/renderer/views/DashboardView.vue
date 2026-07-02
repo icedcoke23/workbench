@@ -1,32 +1,32 @@
 <template>
   <div class="page-container">
     <!-- 顶部统计卡片 -->
-    <a-row :gutter="16" class="stat-row">
-      <a-col :span="6">
-        <a-card class="stat-card" :bordered="false">
-          <div class="num">{{ stats.totalStudents }}</div>
-          <div class="label"><TeamOutlined /> 学生数</div>
-        </a-card>
-      </a-col>
-      <a-col :span="6">
-        <a-card class="stat-card" :bordered="false">
-          <div class="num">{{ stats.totalClasses }}</div>
-          <div class="label"><BankOutlined /> 班级数</div>
-        </a-card>
-      </a-col>
-      <a-col :span="6">
-        <a-card class="stat-card" :bordered="false">
-          <div class="num">{{ stats.weekLessonCount }}</div>
-          <div class="label"><CalendarOutlined /> 本周课时</div>
-        </a-card>
-      </a-col>
-      <a-col :span="6">
-        <a-card class="stat-card" :bordered="false">
-          <div class="num">{{ stats.pendingFeedbackCount }}</div>
-          <div class="label"><BellOutlined /> 待反馈数</div>
-        </a-card>
-      </a-col>
-    </a-row>
+    <div class="stat-row">
+      <a-card class="stat-card" :bordered="false">
+        <div class="num">{{ stats.totalStudents }}</div>
+        <div class="label"><TeamOutlined /> 学生数</div>
+      </a-card>
+      <a-card class="stat-card" :bordered="false">
+        <div class="num">{{ stats.totalClasses }}</div>
+        <div class="label"><BankOutlined /> 班级数</div>
+      </a-card>
+      <a-card class="stat-card" :bordered="false">
+        <div class="num">{{ stats.weekLessonCount }}</div>
+        <div class="label"><CalendarOutlined /> 本周课时</div>
+      </a-card>
+      <a-card class="stat-card" :bordered="false">
+        <div class="num">{{ stats.pendingFeedbackCount }}</div>
+        <div class="label"><BellOutlined /> 待反馈数</div>
+      </a-card>
+      <a-card
+        class="stat-card"
+        :bordered="false"
+        :class="{ 'stat-card-warn': stats.pendingReflectionCount > 0 }"
+      >
+        <div class="num">{{ stats.pendingReflectionCount }}</div>
+        <div class="label"><EditOutlined /> 待反思课次</div>
+      </a-card>
+    </div>
 
     <!-- 图表展示 -->
     <a-row v-if="charts" :gutter="16" class="chart-row">
@@ -169,6 +169,9 @@
         </a-tag>
         <a-tag v-if="stats.pendingFeedbackCount > 0" color="orange" style="margin-left: 4px">
           待反馈 {{ stats.pendingFeedbackCount }}
+        </a-tag>
+        <a-tag v-if="stats.pendingReflectionCount > 0" color="gold" style="margin-left: 4px">
+          待反思 {{ stats.pendingReflectionCount }}
         </a-tag>
       </template>
       <template #extra>
@@ -314,7 +317,8 @@ import {
   DeleteOutlined,
   CheckOutlined,
   ClockCircleOutlined,
-  ExclamationCircleOutlined
+  ExclamationCircleOutlined,
+  EditOutlined
 } from '@ant-design/icons-vue'
 import { call } from '@renderer/api'
 import { subscribeRefresh } from '@renderer/composables/useShortcuts'
@@ -336,7 +340,8 @@ const stats = ref<DashboardData['stats']>({
   totalClasses: 0,
   weekLessonCount: 0,
   pendingFeedbackCount: 0,
-  pendingPrepCount: 0
+  pendingPrepCount: 0,
+  pendingReflectionCount: 0
 })
 const todos = ref<Todo[]>([])
 const weekLessons = ref<Lesson[]>([])
@@ -393,10 +398,10 @@ function weekdayText(w: number): string {
   return WEEKDAYS[w] ?? '-'
 }
 function typeText(t: TodoType): string {
-  return t === 'prep' ? '备课' : t === 'feedback' ? '反馈' : '手动'
+  return t === 'prep' ? '备课' : t === 'feedback' ? '反馈' : t === 'reflection' ? '反思' : '手动'
 }
 function typeColor(t: TodoType): string {
-  return t === 'prep' ? 'blue' : t === 'feedback' ? 'orange' : 'green'
+  return t === 'prep' ? 'blue' : t === 'feedback' ? 'orange' : t === 'reflection' ? 'gold' : 'green'
 }
 /** 待办是否逾期：未完成且截止时间早于当前 */
 function isOverdue(todo: Todo): boolean {
@@ -629,11 +634,22 @@ onUnmounted(() => {
 
 <style scoped>
 .stat-row {
+  display: flex;
+  gap: 16px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 .stat-card {
+  flex: 1 1 0;
+  min-width: 160px;
   border-radius: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.stat-card-warn {
+  box-shadow: 0 1px 3px rgba(250, 173, 20, 0.18);
+}
+.stat-card-warn .num {
+  color: #faad14;
 }
 .stat-card .num {
   font-size: 28px;

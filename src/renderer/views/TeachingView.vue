@@ -70,6 +70,20 @@
                 >
                   {{ prepStageTag(l).text }}
                 </a-tag>
+                <a-tag
+                  v-if="l.status === 'finished' && !l.reflection"
+                  color="gold"
+                  size="small"
+                >
+                  <EditOutlined /> 待反思
+                </a-tag>
+                <a-tag
+                  v-else-if="l.status === 'finished' && l.reflection"
+                  color="green"
+                  size="small"
+                >
+                  已反思
+                </a-tag>
               </div>
               <div class="lesson-card-actions" @click.stop>
                 <a-button
@@ -81,6 +95,14 @@
                   @click="startTeaching(l)"
                 >
                   {{ l.status === 'teaching' ? '继续上课' : '一键上课' }}
+                </a-button>
+                <a-button
+                  v-else
+                  size="small"
+                  block
+                  @click="openReflectionForLesson(l)"
+                >
+                  <EditOutlined /> {{ l.reflection ? '查看/修改反思' : '补填反思' }}
                 </a-button>
                 <a-space :size="4" class="lesson-edit-actions">
                   <a-button size="small" @click="openEditLesson(l)">
@@ -224,8 +246,8 @@
                 <a-collapse-panel v-if="prepPlan.process" key="process" header="教学过程">
                   <div class="prep-plan-text">{{ prepPlan.process }}</div>
                 </a-collapse-panel>
-                <a-collapse-panel v-if="prepPlan.reflection" key="reflection" header="课后反思">
-                  <div class="prep-plan-text">{{ prepPlan.reflection }}</div>
+                <a-collapse-panel v-if="reflectionDisplay" key="reflection" header="课后反思">
+                  <div class="prep-plan-text">{{ reflectionDisplay }}</div>
                 </a-collapse-panel>
               </a-collapse>
               <span v-else class="prep-meta-empty">该教案所有章节均未填写内容</span>
@@ -396,10 +418,10 @@
       </a-form>
     </a-modal>
 
-    <!-- ============ 课后反思 Modal（结束上课引导填写） ============ -->
+    <!-- ============ 课后反思 Modal（结束上课引导填写 / 历史课次补填） ============ -->
     <a-modal
       v-model:open="reflectionModalVisible"
-      title="课后反思"
+      :title="reflectionMode === 'finish' ? '课后反思' : '补填/修改课后反思'"
       :width="680"
       :mask-closable="false"
       :destroy-on-close="true"
@@ -407,18 +429,23 @@
       <template #footer>
         <a-space>
           <a-button @click="reflectionModalVisible = false">取消</a-button>
-          <a-button danger :loading="reflectionSubmitting" @click="finishWithoutReflection">
-            直接结束上课
-          </a-button>
-          <a-button type="primary" :loading="reflectionSubmitting" @click="submitReflectionAndFinish">
-            保存反思并结束
+          <template v-if="reflectionMode === 'finish'">
+            <a-button danger :loading="reflectionSubmitting" @click="finishWithoutReflection">
+              直接结束上课
+            </a-button>
+            <a-button type="primary" :loading="reflectionSubmitting" @click="submitReflectionAndFinish">
+              保存反思并结束
+            </a-button>
+          </template>
+          <a-button v-else type="primary" :loading="reflectionSubmitting" @click="saveReflectionEdit">
+            保存反思
           </a-button>
         </a-space>
       </template>
       <a-alert
         type="info"
         show-icon
-        message="本节课关联了备课教案，建议结束后填写课后反思"
+        :message="reflectionMode === 'finish' ? '建议结束后填写课后反思' : '补填本课次的课后反思'"
         :description="reflectionContextDesc"
         style="margin-bottom: 12px"
       />
@@ -462,7 +489,6 @@ import type {
   Lesson,
   LessonInput,
   LessonPlan,
-  LessonPlanInput,
   Student,
   VersionMeta,
   DocLinkWithLesson
@@ -689,12 +715,15 @@ const prepPlan = ref<LessonPlan | null>(null)
 const prepPlanLoading = ref(false)
 const prepPlanActiveKeys = ref<string[]>(['process'])
 
-// 课后反思 Modal（课次结束引导填写）
+// 课后反思 Modal（课次结束引导填写 / 历史课次补填）
+// 反思按 per-lesson 存储：lessonId 标识当前反思所属课次
 const reflectionModalVisible = ref(false)
 const reflectionSubmitting = ref(false)
+const reflectionMode = ref<'finish' | 'edit'>('finish')
 const reflectionForm = reactive({
   text: '',
-  ideaVersionId: '' as string
+  lessonId: '' as string,
+  lessonTitle: '' as string
 })
 
 // 课次手动管理 Modal 状态
@@ -987,13 +1016,27 @@ const prepPlanHasContent = computed<boolean>(() => {
 
 /** 课后反思 Modal 的上下文描述 */
 const reflectionContextDesc = computed(() => {
+  if (reflectionMode.value === 'edit') {
+    return `课次：${reflectionForm.lessonTitle || '当前课次'}。反思独立保存到该课次，作为后续教学改进参考。`
+  }
   const plan = prepPlan.value
   const verName = plan?.versionName || '当前版本'
-  return `关联版本：${verName}。反思将保存到该教案「课后反思」章节，作为后续教学改进参考。`
+  return `关联版本：${verName}。反思将独立保存到本课次（而非共享版本），避免同版本多课次互相覆盖。`
 })
 
 /** 课后反思时展示的本节课教学目标（对照目标反思达成情况） */
 const reflectionObjectives = computed(() => prepPlan.value?.objectives || '')
+
+/**
+ * 授课模式下展示的课后反思内容：
+ * 优先取本课次自己的反思（per-lesson），为空时回退到教案版本的反思（历史数据），
+ * 保证从旧模型迁移时已有反思仍可见。
+ */
+const reflectionDisplay = computed(() => {
+  const own = teachingLesson.value?.reflection
+  if (own) return own
+  return prepPlan.value?.reflection || ''
+})
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -1087,21 +1130,21 @@ async function launchScratch(): Promise<void> {
 async function confirmFinish(): Promise<void> {
   if (!teachingLesson.value) return
   const versionId = teachingLesson.value.ideaVersionId
-  // 若关联了备课版本，拉取最新教案判断「课后反思」是否已填写
-  let plan: LessonPlan | null = null
+  // 若关联了备课版本，拉取最新教案供反思时对照教学目标
   if (versionId) {
     try {
-      plan = (await call(window.api.lessonPlan.getByVersion(versionId))) ?? null
-      // 同步刷新授课页教案状态，保证后续展示一致
-      prepPlan.value = plan
+      prepPlan.value = (await call(window.api.lessonPlan.getByVersion(versionId))) ?? null
     } catch {
-      plan = null
+      prepPlan.value = null
     }
   }
-  // 已关联版本、教案存在、但课后反思为空 -> 引导填写反思
-  if (versionId && plan && !plan.reflection) {
+  // 本课次尚未填写反思 -> 引导填写（per-lesson 存储，不再依赖教案是否存在）
+  if (!teachingLesson.value.reflection) {
+    reflectionMode.value = 'finish'
     reflectionForm.text = ''
-    reflectionForm.ideaVersionId = versionId
+    reflectionForm.lessonId = teachingLesson.value.id
+    reflectionForm.lessonTitle =
+      teachingLesson.value.subject || teachingLesson.value.className || '当前课次'
     reflectionModalVisible.value = true
     return
   }
@@ -1116,17 +1159,15 @@ async function confirmFinish(): Promise<void> {
   })
 }
 
-/** 真正执行结束课次：可选先保存课后反思 */
+/** 真正执行结束课次：可选先保存课后反思（写入 per-lesson 反思字段） */
 async function doFinish(saveReflection: boolean): Promise<void> {
   if (!teachingLesson.value) return
   reflectionSubmitting.value = true
   try {
-    if (saveReflection && reflectionForm.ideaVersionId) {
-      const input: LessonPlanInput = {
-        ideaVersionId: reflectionForm.ideaVersionId,
-        reflection: reflectionForm.text.trim() || null
-      }
-      await call(window.api.lessonPlan.upsert(input))
+    if (saveReflection && reflectionForm.lessonId) {
+      await call(
+        window.api.lesson.setReflection(reflectionForm.lessonId, reflectionForm.text.trim() || null)
+      )
     }
     await call(window.api.lesson.finish(teachingLesson.value.id))
     message.success('已结束上课')
@@ -1152,6 +1193,44 @@ async function submitReflectionAndFinish(): Promise<void> {
 /** 不填写反思，直接结束上课 */
 function finishWithoutReflection(): void {
   void doFinish(false)
+}
+
+/**
+ * 为已结课的课次补填/修改课后反思（不触发结课流程）。
+ * 拉取关联教案以提供教学目标作为反思对照上下文。
+ */
+async function openReflectionForLesson(l: Lesson): Promise<void> {
+  reflectionMode.value = 'edit'
+  reflectionForm.lessonId = l.id
+  reflectionForm.text = l.reflection || ''
+  reflectionForm.lessonTitle = l.subject || l.className || '当前课次'
+  prepPlan.value = null
+  if (l.ideaVersionId) {
+    try {
+      prepPlan.value = (await call(window.api.lessonPlan.getByVersion(l.ideaVersionId))) ?? null
+    } catch {
+      prepPlan.value = null
+    }
+  }
+  reflectionModalVisible.value = true
+}
+
+/** 保存补填/修改的课后反思（仅写反思，不结课） */
+async function saveReflectionEdit(): Promise<void> {
+  if (!reflectionForm.lessonId) return
+  reflectionSubmitting.value = true
+  try {
+    await call(
+      window.api.lesson.setReflection(reflectionForm.lessonId, reflectionForm.text.trim() || null)
+    )
+    message.success('反思已保存')
+    reflectionModalVisible.value = false
+    await loadLessons()
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    reflectionSubmitting.value = false
+  }
 }
 
 onMounted(async () => {

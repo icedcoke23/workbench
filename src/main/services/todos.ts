@@ -10,6 +10,8 @@ import type { DashboardCharts, DashboardData, Lesson, PrepStage, Todo } from '@s
 const PREP_LEAD_HOURS = 24
 /** 反馈待办有效期（小时）：课次结束后该窗口内未发反馈则生成反馈待办 */
 const FEEDBACK_DUE_HOURS = 24
+/** 反思待办有效期（小时）：课次结束后该窗口内未填反思则生成反思待办 */
+const REFLECTION_DUE_HOURS = 48
 
 /** 备课阶段 → 待办标题中标注的具体缺失项；就绪阶段返回空字符串（不生成待办） */
 const PREP_STAGE_LABEL: Record<PrepStage, string> = {
@@ -37,6 +39,10 @@ export function regenerateAutoTodos(): Todo[] {
   const finished = lessonRepo.list({}).filter(
     (l) => l.status === 'finished' && !l.feedbackSent
   )
+  // 已结课但未填写反思的课次（per-lesson 反思字段为空）
+  const reflectionPending = lessonRepo.list({}).filter(
+    (l) => l.status === 'finished' && !l.reflection
+  )
 
   const desired: AutoTodoSpec[] = []
 
@@ -62,6 +68,19 @@ export function regenerateAutoTodos(): Todo[] {
       type: 'feedback',
       refLessonId: l.id,
       title: `反馈待办：${l.className ?? '课程'} ${l.startTime}`,
+      dueAt: due
+    })
+  }
+
+  // 反思待办：已结课未填反思的课次，限定在结束后窗口期内提醒
+  for (const l of reflectionPending) {
+    const due = new Date(
+      new Date(l.endTime).getTime() + REFLECTION_DUE_HOURS * 3_600_000
+    ).toISOString()
+    desired.push({
+      type: 'reflection',
+      refLessonId: l.id,
+      title: `反思待办：${l.className ?? '课程'} ${l.startTime}`,
       dueAt: due
     })
   }
@@ -98,7 +117,8 @@ export function buildDashboard(): DashboardData {
       totalClasses: classRepo.list().length,
       weekLessonCount: weekLessons.length,
       pendingFeedbackCount: todos.filter((t) => t.type === 'feedback' && t.status !== 'done').length,
-      pendingPrepCount: todos.filter((t) => t.type === 'prep' && t.status !== 'done').length
+      pendingPrepCount: todos.filter((t) => t.type === 'prep' && t.status !== 'done').length,
+      pendingReflectionCount: todos.filter((t) => t.type === 'reflection' && t.status !== 'done').length
     },
     charts: buildCharts(weekLessons)
   }

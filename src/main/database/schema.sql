@@ -79,6 +79,9 @@ CREATE TABLE IF NOT EXISTS lesson_plans (
 );
 
 -- 课次
+-- reflection / reflected_at 为 per-lesson 课后反思存储：
+--   历史数据落在 lesson_plans.reflection（共享于版本，多课次会互相覆盖），
+--   新模型将反思落库到具体课次，避免同版本多课次互相覆盖。
 CREATE TABLE IF NOT EXISTS lessons (
   id TEXT PRIMARY KEY,
   class_id TEXT NOT NULL,
@@ -88,12 +91,16 @@ CREATE TABLE IF NOT EXISTS lessons (
   subject TEXT,
   status TEXT DEFAULT 'pending',
   feedback_sent INTEGER DEFAULT 0,
+  reflection TEXT,
+  reflected_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
   FOREIGN KEY (idea_version_id) REFERENCES idea_versions(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_lessons_class ON lessons(class_id);
 CREATE INDEX IF NOT EXISTS idx_lessons_time ON lessons(start_time);
+CREATE INDEX IF NOT EXISTS idx_lessons_status ON lessons(status);
+CREATE INDEX IF NOT EXISTS idx_lessons_reflected ON lessons(reflected_at);
 
 -- 课堂记录
 CREATE TABLE IF NOT EXISTS lesson_records (

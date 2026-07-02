@@ -45,7 +45,7 @@ import type {
 export const API_METHODS: Record<string, string[]> = {
   student: ['list', 'get', 'create', 'update', 'remove', 'allTags'],
   class: ['list', 'get', 'create', 'update', 'remove', 'members', 'addMembers', 'removeMember'],
-  lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'records', 'score', 'pick'],
+  lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'setReflection', 'records', 'score', 'pick'],
   idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'updateVersion', 'removeVersion', 'getVersionMeta'],
   lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'generateDraft', 'exportMarkdown', 'exportPdf', 'prepOverview', 'review'],
   lessonPlanTemplate: ['list', 'create', 'update', 'remove'],
@@ -93,6 +93,7 @@ export interface WorkbenchAPI {
     update: (id: ID, input: Partial<LessonInput>) => Promise<Result<Lesson>>
     remove: (id: ID) => Promise<Result<void>>
     finish: (id: ID) => Promise<Result<Lesson>>
+    setReflection: (id: ID, text: string | null) => Promise<Result<Lesson>>
     records: (lessonId: ID) => Promise<Result<LessonRecord[]>>
     score: (action: ScoreAction) => Promise<Result<LessonRecord>>
     pick: (lessonId: ID) => Promise<Result<Student>>

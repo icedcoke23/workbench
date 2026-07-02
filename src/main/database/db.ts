@@ -22,6 +22,10 @@ export function initDatabase(dbPath: string): DB {
   // 执行建表脚本
   db.exec(schemaSql)
 
+  // 幂等迁移：为已存在的 lessons 表补充 per-lesson 反思列
+  // （CREATE TABLE IF NOT EXISTS 不会为已建表追加列，需 ALTER TABLE）
+  migrateLessonsReflection(db)
+
   // 先暴露实例，种子数据初始化内部需要通过 db() 取实例
   dbInstance = db
 
@@ -52,6 +56,23 @@ export function closeDatabase(): void {
   if (dbInstance) {
     dbInstance.close()
     dbInstance = null
+  }
+}
+
+/**
+ * 幂等迁移：为 lessons 表追加 reflection / reflected_at 列。
+ * 通过 PRAGMA table_info 探测列是否已存在，避免重复 ALTER 报错。
+ * 历史反思数据仍保留在 lesson_plans.reflection，读取时按 lesson 优先、
+ * plan 兜底的方式合并展示，保证向前兼容。
+ */
+function migrateLessonsReflection(db: DB): void {
+  const cols = db.prepare(`PRAGMA table_info(lessons)`).all() as Array<{ name: string }>
+  const names = new Set(cols.map((c) => c.name))
+  if (!names.has('reflection')) {
+    db.exec(`ALTER TABLE lessons ADD COLUMN reflection TEXT`)
+  }
+  if (!names.has('reflected_at')) {
+    db.exec(`ALTER TABLE lessons ADD COLUMN reflected_at DATETIME`)
   }
 }
 

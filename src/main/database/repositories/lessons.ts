@@ -1,4 +1,4 @@
-import { db, uuid } from '../db'
+import { db, uuid, now } from '../db'
 import type { Lesson, LessonInput, LessonRecord, PrepStage, ScoreAction } from '@shared/types'
 import * as classRepo from './classes'
 
@@ -11,6 +11,8 @@ interface LessonRow {
   subject: string | null
   status: string
   feedback_sent: number
+  reflection: string | null
+  reflected_at: string | null
   created_at: string
   prep_stage?: string | null
 }
@@ -49,7 +51,9 @@ function mapRow(r: JoinedLessonRow): Lesson {
     status: r.status as Lesson['status'],
     feedbackSent: r.feedback_sent === 1,
     subject: r.subject,
-    prepStage: (r.prep_stage as PrepStage | null) ?? undefined
+    prepStage: (r.prep_stage as PrepStage | null) ?? undefined,
+    reflection: r.reflection ?? null,
+    reflectedAt: r.reflected_at ?? null
   }
 }
 
@@ -116,6 +120,34 @@ export function remove(id: string): void {
 export function finish(id: string): Lesson | null {
   db().prepare(`UPDATE lessons SET status = 'finished' WHERE id = ?`).run(id)
   return get(id)
+}
+
+/**
+ * 写入 per-lesson 课后反思。
+ * - text 为空字符串/null 视为清空反思（同时清空 reflected_at）
+ * - 非空时记录 reflected_at 为当前时间
+ * 返回更新后的课次；课次不存在返回 null
+ */
+export function setReflection(id: string, text: string | null): Lesson | null {
+  const trimmed = text?.trim() || null
+  const reflectedAt = trimmed ? now() : null
+  db()
+    .prepare(`UPDATE lessons SET reflection = ?, reflected_at = ? WHERE id = ?`)
+    .run(trimmed, reflectedAt, id)
+  return get(id)
+}
+
+/** 已结课但未填写反思的课次数（用于仪表盘「待反思」统计） */
+export function countPendingReflection(): number {
+  const row = db()
+    .prepare(
+      `SELECT COUNT(*) as n FROM lessons
+       WHERE status = 'finished'
+         AND (reflection IS NULL OR reflection = '')
+         AND (reflected_at IS NULL)`
+    )
+    .get() as { n: number }
+  return row?.n ?? 0
 }
 
 export function setFeedbackSent(id: string): void {

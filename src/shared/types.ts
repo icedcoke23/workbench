@@ -157,6 +157,10 @@ export interface Lesson {
   subject?: string | null
   /** 备课进度阶段（list/get 时由 SQL JOIN 派生，可能为空表示未计算） */
   prepStage?: PrepStage
+  /** 课后反思（per-lesson 存储，避免同版本多课次互相覆盖） */
+  reflection?: string | null
+  /** 反思填写时间（ISO），为空表示未填写 */
+  reflectedAt?: string | null
 }
 
 /** 备课进度看板：跨点子/版本的备课完成情况汇总 */
@@ -210,7 +214,7 @@ export interface ScoreAction {
 }
 
 // ============ 待办 ============
-export type TodoType = 'prep' | 'feedback' | 'manual'
+export type TodoType = 'prep' | 'feedback' | 'reflection' | 'manual'
 export type TodoStatus = 'todo' | 'doing' | 'done'
 export interface Todo {
   id: ID
@@ -314,6 +318,7 @@ export interface DashboardData {
     weekLessonCount: number
     pendingFeedbackCount: number
     pendingPrepCount: number
+    pendingReflectionCount: number
   }
   charts?: DashboardCharts
 }
