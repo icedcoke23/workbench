@@ -120,6 +120,12 @@ export interface LessonPlan {
   durationMinutes?: number | null
   createdAt: string
   updatedAt: string
+  /** 使用该教案（关联版本）的课次数（list 时按需聚合，可能为空） */
+  lessonCount?: number
+  /** 使用该教案的班级名集合（list 时按需聚合） */
+  usedClasses?: string[]
+  /** 使用该教案的科目集合（list 时按需聚合） */
+  usedSubjects?: string[]
 }
 export interface LessonPlanInput {
   ideaVersionId: ID
@@ -130,6 +136,17 @@ export interface LessonPlanInput {
   process?: string | null
   reflection?: string | null
   durationMinutes?: number | null
+}
+/** 教案克隆入参：将现有教案内容复制到新版本（反思不复制） */
+export interface LessonPlanCloneInput {
+  /** 目标点子 ID；不传则新建一个点子承载克隆版本 */
+  ideaId?: ID
+  /** 新点子标题（ideaId 为空时使用） */
+  ideaTitle?: string
+  /** 新版本名 */
+  versionName: string
+  /** 新教案标题；不传则沿用源教案标题加「（副本）」后缀 */
+  title?: string | null
 }
 
 // ============ 课程/课次 ============

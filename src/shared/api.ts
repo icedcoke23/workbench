@@ -17,6 +17,7 @@ import type {
   LessonInput,
   LessonPlan,
   LessonPlanInput,
+  LessonPlanCloneInput,
   LessonPlanTemplateRecord,
   LessonPlanTemplateRecordInput,
   LessonRecord,
@@ -47,7 +48,7 @@ export const API_METHODS: Record<string, string[]> = {
   class: ['list', 'get', 'create', 'update', 'remove', 'members', 'addMembers', 'removeMember'],
   lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'setReflection', 'assess', 'records', 'score', 'pick'],
   idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'updateVersion', 'removeVersion', 'getVersionMeta'],
-  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'generateDraft', 'exportMarkdown', 'exportPdf', 'prepOverview', 'review'],
+  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'clone', 'generateDraft', 'exportMarkdown', 'exportPdf', 'prepOverview', 'review'],
   lessonPlanTemplate: ['list', 'create', 'update', 'remove'],
   todo: ['list', 'create', 'update', 'remove', 'regenerate'],
   resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags', 'readFile'],
@@ -113,11 +114,17 @@ export interface WorkbenchAPI {
   }
   // 教案
   lessonPlan: {
-    list: (q?: { ideaId?: ID; keyword?: string }) => Promise<Result<LessonPlan[]>>
+    list: (q?: {
+      ideaId?: ID
+      keyword?: string
+      classId?: ID
+      subject?: string
+    }) => Promise<Result<LessonPlan[]>>
     get: (id: ID) => Promise<Result<LessonPlan>>
     getByVersion: (versionId: ID) => Promise<Result<LessonPlan | null>>
     upsert: (input: LessonPlanInput) => Promise<Result<LessonPlan>>
     remove: (id: ID) => Promise<Result<void>>
+    clone: (sourcePlanId: ID, input: LessonPlanCloneInput) => Promise<Result<LessonPlan>>
     generateDraft: (versionId: ID, durationMinutes?: number | null) => Promise<Result<string>>
     exportMarkdown: (id: ID) => Promise<Result<string | null>>
     exportPdf: (id: ID) => Promise<Result<string | null>>

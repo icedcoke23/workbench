@@ -112,13 +112,29 @@
 
         <div class="tab-toolbar">
           <span class="section-title">教案</span>
-          <a-space>
+          <a-space wrap>
             <a-input-search
               v-model:value="planKeyword"
               placeholder="搜索教案（标题/目标/重难点/过程/反思/版本名/点子）"
-              style="width: 360px"
+              style="width: 280px"
               allow-clear
               @search="loadPlans"
+            />
+            <a-select
+              v-model:value="planFilterClassId"
+              placeholder="按班级筛选"
+              style="width: 180px"
+              allow-clear
+              :options="planClassOptions"
+              @change="loadPlans"
+            />
+            <a-select
+              v-model:value="planFilterSubject"
+              placeholder="按科目筛选"
+              style="width: 160px"
+              allow-clear
+              :options="planSubjectOptions"
+              @change="loadPlans"
             />
             <a-button @click="loadPlans"><ReloadOutlined /> 刷新</a-button>
             <a-button @click="openTemplateGallery"><CopyOutlined /> 从模板新建</a-button>
@@ -234,9 +250,18 @@
                   <a-button size="small" @click="openPlanForVersion(item.ideaVersionId)">
                     <EditOutlined /> 编辑
                   </a-button>
-                  <a-tooltip title="复制为新教案（作为模板）">
+                  <a-tooltip title="一键克隆到新版本（持久化保存）">
+                    <a-button
+                      size="small"
+                      :loading="cloningId === item.id"
+                      @click="openClonePlanModal(item)"
+                    >
+                      <CopyOutlined /> 克隆
+                    </a-button>
+                  </a-tooltip>
+                  <a-tooltip title="复制内容到编辑器（作为模板，手动选版本保存）">
                     <a-button size="small" :loading="duplicatingId === item.id" @click="duplicatePlan(item)">
-                      <CopyOutlined />
+                      <SnippetsOutlined />
                     </a-button>
                   </a-tooltip>
                   <a-tooltip title="导出为 Markdown 文件">
@@ -264,6 +289,19 @@
                 >{{ sec }}</a-tag>
                 <span v-if="planFilledSections(item).length === 0" class="plan-empty-sections">
                   暂未填写任何章节内容
+                </span>
+              </div>
+
+              <!-- 历史使用情况：班级/科目/课次数 -->
+              <div v-if="item.lessonCount || (item.usedClasses && item.usedClasses.length)" class="plan-usage">
+                <span v-if="item.lessonCount" class="plan-usage-item">
+                  <CalendarOutlined /> 已用 {{ item.lessonCount }} 课次
+                </span>
+                <span v-if="item.usedClasses && item.usedClasses.length" class="plan-usage-item">
+                  <BankOutlined /> {{ item.usedClasses.join('、') }}
+                </span>
+                <span v-if="item.usedSubjects && item.usedSubjects.length" class="plan-usage-item">
+                  <TagOutlined /> {{ item.usedSubjects.join('、') }}
                 </span>
               </div>
 
@@ -946,6 +984,60 @@
       </a-form>
     </a-modal>
 
+    <!-- ============ 教案克隆 Modal ============ -->
+    <a-modal
+      v-model:open="clonePlanVisible"
+      title="一键克隆教案"
+      :width="560"
+      :confirm-loading="cloning"
+      ok-text="克隆"
+      cancel-text="取消"
+      @ok="confirmClonePlan"
+    >
+      <a-alert
+        type="info"
+        show-icon
+        message="将源教案内容复制到新版本，反思不复制"
+        description="克隆会在目标点子下创建新版本并持久化保存教案内容，便于基于历史教案快速派生新备课。"
+        style="margin-bottom: 12px"
+      />
+      <a-form layout="vertical">
+        <a-form-item label="源教案">
+          <a-input :value="clonePlanSourceTitle" disabled />
+        </a-form-item>
+        <a-form-item label="目标点子">
+          <a-radio-group v-model:value="clonePlanTargetMode">
+            <a-radio value="new">新建点子</a-radio>
+            <a-radio value="existing">选择已有点子</a-radio>
+          </a-radio-group>
+          <a-input
+            v-if="clonePlanTargetMode === 'new'"
+            v-model:value="clonePlanForm.ideaTitle"
+            placeholder="新点子标题（留空则沿用源教案点子标题）"
+            style="margin-top: 8px"
+          />
+          <a-select
+            v-else
+            v-model:value="clonePlanForm.ideaId"
+            placeholder="选择目标点子"
+            style="width: 100%; margin-top: 8px"
+            :options="cloneIdeaOptions"
+            show-search
+            :filter-option="filterIdeaOption"
+          />
+        </a-form-item>
+        <a-form-item label="新版本名" required>
+          <a-input v-model:value="clonePlanForm.versionName" placeholder="如：v2 / 优化版 / 某某班定制版" />
+        </a-form-item>
+        <a-form-item label="新教案标题">
+          <a-input
+            v-model:value="clonePlanForm.title"
+            placeholder="留空则沿用源标题加「（副本）」后缀"
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
     <!-- ============ 教案模板库 Modal ============ -->
     <a-modal
       v-model:open="templateGalleryVisible"
@@ -1119,7 +1211,10 @@ import {
   CalendarOutlined,
   LeftOutlined,
   RightOutlined,
-  FilePdfOutlined
+  FilePdfOutlined,
+  SnippetsOutlined,
+  BankOutlined,
+  TagOutlined
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
@@ -1144,6 +1239,7 @@ import type {
   Lesson,
   LessonPlan,
   LessonPlanInput,
+  LessonPlanCloneInput,
   LessonPlanTemplateRecord,
   LessonPlanTemplateRecordInput,
   PrepOverview,
@@ -1234,6 +1330,11 @@ async function removeVersion(versionId: string): Promise<void> {
 const plans = ref<LessonPlan[]>([])
 const plansLoading = ref(false)
 const planKeyword = ref('')
+// 历史教案按班级/科目检索（G12）
+const planFilterClassId = ref<string | undefined>(undefined)
+const planFilterSubject = ref<string | undefined>(undefined)
+const planClassOptions = ref<Array<{ label: string; value: string }>>([])
+const planSubjectOptions = ref<Array<{ label: string; value: string }>>([])
 // 备课进度看板（G6-4）
 const prepOverview = ref<PrepOverview | null>(null)
 const prepOverviewLoading = ref(false)
@@ -1416,12 +1517,41 @@ const planVersionOptions = computed(() => {
 async function loadPlans(): Promise<void> {
   plansLoading.value = true
   try {
+    const q: { keyword?: string; classId?: string; subject?: string } = {}
     const kw = planKeyword.value.trim()
-    plans.value = await call(window.api.lessonPlan.list(kw ? { keyword: kw } : undefined))
+    if (kw) q.keyword = kw
+    if (planFilterClassId.value) q.classId = planFilterClassId.value
+    if (planFilterSubject.value) q.subject = planFilterSubject.value
+    plans.value = await call(window.api.lessonPlan.list(Object.keys(q).length ? q : undefined))
   } catch (e) {
     message.error(`加载教案失败：${String(e instanceof Error ? e.message : e)}`)
   } finally {
     plansLoading.value = false
+  }
+}
+
+/**
+ * 加载教案筛选下拉选项（G12）：
+ * - 班级：从班级库拉取全部班级
+ * - 科目：从课次列表中提取 distinct 非空 subject
+ */
+async function loadPlanFilterOptions(): Promise<void> {
+  try {
+    const [classes, lessonList] = await Promise.all([
+      call(window.api.class.list()),
+      call(window.api.lesson.list({}))
+    ])
+    planClassOptions.value = classes.map((c) => ({ label: c.name, value: c.id }))
+    const subjectSet = new Set<string>()
+    lessonList.forEach((l: Lesson) => {
+      if (l.subject && l.subject.trim()) subjectSet.add(l.subject.trim())
+    })
+    planSubjectOptions.value = Array.from(subjectSet)
+      .sort((a, b) => a.localeCompare(b, 'zh-CN'))
+      .map((s) => ({ label: s, value: s }))
+  } catch {
+    planClassOptions.value = []
+    planSubjectOptions.value = []
   }
 }
 
@@ -1989,6 +2119,29 @@ async function removePlan(id: string): Promise<void> {
 const exportingId = ref<string | null>(null)
 const duplicatingId = ref<string | null>(null)
 
+// 教案克隆（G12）：一键复制到新版本并持久化保存
+const clonePlanVisible = ref(false)
+const cloning = ref(false)
+const cloningId = ref<string | null>(null)
+const clonePlanSourceId = ref<string | null>(null)
+const clonePlanSourceTitle = ref('')
+const clonePlanTargetMode = ref<'new' | 'existing'>('new')
+const clonePlanForm = reactive<{
+  ideaId: string | undefined
+  ideaTitle: string
+  versionName: string
+  title: string
+}>({
+  ideaId: undefined,
+  ideaTitle: '',
+  versionName: '',
+  title: ''
+})
+/** 目标点子下拉选项（从点子库派生） */
+const cloneIdeaOptions = computed(() =>
+  ideas.value.map((i) => ({ value: i.id, label: i.title }))
+)
+
 /** 导出指定教案为 Markdown 文件（主进程弹出保存对话框） */
 async function exportPlan(plan: LessonPlan): Promise<void> {
   exportingId.value = plan.id
@@ -2044,6 +2197,70 @@ async function duplicatePlan(plan: LessonPlan): Promise<void> {
     message.info('已复制教案内容为模板，请选择关联版本后保存')
   } finally {
     duplicatingId.value = null
+  }
+}
+
+/**
+ * 打开教案克隆弹窗：将源教案内容复制到新版本并持久化保存。
+ * 与 duplicatePlan 的区别在于克隆会直接落库为独立教案，无需二次保存。
+ */
+function openClonePlanModal(plan: LessonPlan): void {
+  cloningId.value = plan.id
+  clonePlanSourceId.value = plan.id
+  clonePlanSourceTitle.value =
+    plan.title || `${plan.versionName ?? '未命名版本'} 教案`
+  clonePlanTargetMode.value = 'new'
+  clonePlanForm.ideaId = undefined
+  // 默认沿用源点子标题，便于用户调整
+  clonePlanForm.ideaTitle = plan.ideaTitle ?? ''
+  // 默认版本名沿用源版本加 -clone 后缀，提示这是一个派生版本
+  clonePlanForm.versionName = plan.versionName
+    ? `${plan.versionName}-克隆`
+    : '克隆版本'
+  // 留空以触发后端「源标题 +（副本）」后缀默认逻辑
+  clonePlanForm.title = ''
+  clonePlanVisible.value = true
+  cloningId.value = null
+}
+
+/** a-select 自定义过滤：按 label 模糊匹配 */
+function filterIdeaOption(input: string, option: { label: string }): boolean {
+  if (!option?.label) return false
+  return option.label.toLowerCase().includes((input || '').toLowerCase())
+}
+
+/** 确认克隆：调用 lessonPlan.clone 落库并刷新列表 */
+async function confirmClonePlan(): Promise<void> {
+  if (clonePlanTargetMode.value === 'existing' && !clonePlanForm.ideaId) {
+    message.warning('请选择目标点子')
+    return
+  }
+  if (!clonePlanForm.versionName.trim()) {
+    message.warning('请填写新版本名')
+    return
+  }
+  cloning.value = true
+  try {
+    if (!clonePlanSourceId.value) throw new Error('未指定源教案')
+    const input: LessonPlanCloneInput = {
+      versionName: clonePlanForm.versionName.trim(),
+      title: clonePlanForm.title.trim() ? clonePlanForm.title.trim() : null
+    }
+    if (clonePlanTargetMode.value === 'existing') {
+      input.ideaId = clonePlanForm.ideaId
+    } else {
+      input.ideaTitle = clonePlanForm.ideaTitle.trim()
+    }
+    await call(window.api.lessonPlan.clone(clonePlanSourceId.value, input))
+    message.success('已克隆到新版本')
+    clonePlanVisible.value = false
+    await loadIdeas()
+    await loadPlans()
+    await loadPrepOverview()
+  } catch (e) {
+    message.error(`克隆失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    cloning.value = false
   }
 }
 
@@ -2540,6 +2757,7 @@ onMounted(() => {
   loadPlans()
   loadPrepOverview()
   loadCalendarLessons()
+  loadPlanFilterOptions()
 
   const subscribe = window.events['scratch:save-request'] as unknown as SubscribeSave
   offScratchSave = subscribe((payload) => {
@@ -2580,6 +2798,7 @@ onMounted(() => {
     loadPrepOverview()
     loadCalendarLessons()
     loadCustomTemplates()
+    loadPlanFilterOptions()
   })
   // 订阅全局新增事件：触发新建点子弹窗
   offNewItem = subscribeNewItem(openNewIdeaModal, 'prep')
@@ -2809,6 +3028,26 @@ onUnmounted(() => {
 .plan-empty-sections {
   font-size: 12px;
   color: #9ca3af;
+}
+.plan-usage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 6px 0 8px;
+  padding: 6px 10px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #4b5563;
+}
+.plan-usage-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #4b5563;
+}
+.plan-usage-item :deep(.anticon) {
+  color: #8b5cf6;
 }
 .plan-preview-block {
   font-size: 12px;

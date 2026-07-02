@@ -1,5 +1,6 @@
 import { db, uuid } from '../db'
-import type { LessonPlan, LessonPlanInput } from '@shared/types'
+import type { LessonPlan, LessonPlanCloneInput, LessonPlanInput } from '@shared/types'
+import * as ideaRepo from './ideas'
 
 interface LessonPlanRow {
   id: string
@@ -20,6 +21,8 @@ interface JoinedRow extends LessonPlanRow {
   idea_title: string | null
   idea_id: string | null
   lesson_count?: number
+  used_classes?: string | null
+  used_subjects?: string | null
 }
 
 function mapRow(r: JoinedRow): LessonPlan {
@@ -37,13 +40,34 @@ function mapRow(r: JoinedRow): LessonPlan {
     reflection: r.reflection,
     durationMinutes: r.duration_minutes,
     createdAt: r.created_at,
-    updatedAt: r.updated_at
+    updatedAt: r.updated_at,
+    lessonCount: r.lesson_count ?? 0,
+    usedClasses: r.used_classes ? r.used_classes.split('\n').filter(Boolean) : [],
+    usedSubjects: r.used_subjects ? r.used_subjects.split('\n').filter(Boolean) : []
   }
 }
 
-/** 列出全部教案，可按 ideaId 过滤、按 keyword 全文搜索；带版本名与点子标题 */
-export function list(q?: { ideaId?: string; keyword?: string }): LessonPlan[] {
-  let sql = `SELECT lp.*, iv.version_name, i.title AS idea_title, i.id AS idea_id
+/**
+ * 列出全部教案，支持多维度过滤与聚合：
+ * - ideaId：按点子过滤
+ * - keyword：全文搜索（标题/目标/重难点/过程/反思/版本名/点子标题）
+ * - classId：按使用班级过滤（JOIN lessons，仅返回该班级用过的教案）
+ * - subject：按科目过滤（JOIN lessons.subject）
+ * 同时聚合 lesson_count / used_classes / used_subjects，供前端展示使用情况。
+ */
+export function list(q?: {
+  ideaId?: string
+  keyword?: string
+  classId?: string
+  subject?: string
+}): LessonPlan[] {
+  let sql = `SELECT lp.*, iv.version_name, i.title AS idea_title, i.id AS idea_id,
+               (SELECT COUNT(*) FROM lessons l WHERE l.idea_version_id = lp.idea_version_id) AS lesson_count,
+               (SELECT GROUP_CONCAT(DISTINCT c.name, char(10)) FROM lessons l
+                JOIN classes c ON c.id = l.class_id
+                WHERE l.idea_version_id = lp.idea_version_id) AS used_classes,
+               (SELECT GROUP_CONCAT(DISTINCT l.subject, char(10)) FROM lessons l
+                WHERE l.idea_version_id = lp.idea_version_id AND l.subject IS NOT NULL) AS used_subjects
              FROM lesson_plans lp
              JOIN idea_versions iv ON iv.id = lp.idea_version_id
              JOIN ideas i ON i.id = iv.idea_id`
@@ -67,9 +91,64 @@ export function list(q?: { ideaId?: string; keyword?: string }): LessonPlan[] {
     const kw = `%${q.keyword.trim()}%`
     params.push(kw, kw, kw, kw, kw, kw, kw, kw)
   }
+  // 按班级过滤：仅返回该班级课次关联版本上有教案的记录
+  if (q?.classId) {
+    where.push(`EXISTS (SELECT 1 FROM lessons l WHERE l.idea_version_id = lp.idea_version_id AND l.class_id = ?)`)
+    params.push(q.classId)
+  }
+  // 按科目过滤：仅返回该科目课次关联版本上有教案的记录
+  if (q?.subject && q.subject.trim()) {
+    where.push(`EXISTS (SELECT 1 FROM lessons l WHERE l.idea_version_id = lp.idea_version_id AND l.subject = ?)`)
+    params.push(q.subject.trim())
+  }
   if (where.length > 0) sql += ` WHERE ` + where.join(' AND ')
   sql += ` ORDER BY lp.updated_at DESC`
   return (db().prepare(sql).all(...params) as JoinedRow[]).map(mapRow)
+}
+
+/**
+ * 一键克隆教案：将源教案内容复制到新版本（反思不复制，属于课后内容）。
+ * - 若指定 ideaId，在其下创建新版本；否则新建一个点子承载克隆版本
+ * - 新版本自动创建空作品文件路径（null），教师可后续上传
+ * - 新教案标题默认沿用源标题加「（副本）」后缀
+ * 返回克隆后的新教案。
+ */
+export function clonePlan(sourcePlanId: string, input: LessonPlanCloneInput): LessonPlan {
+  const source = get(sourcePlanId)
+  if (!source) throw new Error('源教案不存在')
+
+  // 确定目标点子：复用现有或新建
+  let ideaId = input.ideaId
+  if (!ideaId) {
+    const ideaTitle = input.ideaTitle?.trim() || source.ideaTitle || `${source.title || '克隆教案'} 点子`
+    const idea = ideaRepo.create({ title: ideaTitle })
+    ideaId = idea.id
+  }
+
+  // 创建新版本
+  const version = ideaRepo.createVersion({
+    ideaId,
+    versionName: input.versionName.trim() || '克隆版本'
+  })
+
+  // 复制教案内容（反思清空）
+  const newTitle =
+    input.title !== undefined
+      ? input.title
+      : source.title
+        ? `${source.title}（副本）`
+        : null
+
+  return upsert({
+    ideaVersionId: version.id,
+    title: newTitle,
+    objectives: source.objectives,
+    keyPoints: source.keyPoints,
+    preparation: source.preparation,
+    process: source.process,
+    reflection: null,
+    durationMinutes: source.durationMinutes
+  })
 }
 
 export function get(id: string): LessonPlan | null {

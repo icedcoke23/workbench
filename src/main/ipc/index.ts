@@ -97,6 +97,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('lessonPlan:getByVersion', (_e, versionId) => tryRun(() => lessonPlanRepo.getByVersion(versionId)))
   ipcMain.handle('lessonPlan:upsert', (_e, input) => tryRun(() => lessonPlanRepo.upsert(input)))
   ipcMain.handle('lessonPlan:remove', (_e, id) => tryRun(() => lessonPlanRepo.remove(id)))
+  ipcMain.handle('lessonPlan:clone', (_e, sourcePlanId, input) =>
+    tryRun(() => lessonPlanRepo.clonePlan(sourcePlanId, input))
+  )
   ipcMain.handle('lessonPlan:generateDraft', async (e, versionId, durationMinutes) =>
     tryRunAsync(async () => {
       const win = BrowserWindow.fromWebContents(e.sender) ?? getMainWindow()
