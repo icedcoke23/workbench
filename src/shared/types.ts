@@ -221,10 +221,12 @@ export interface PrepOverview {
   totalVersions: number
   /** 已编写教案的版本数 */
   versionsWithPlan: number
-  /** 教案关键章节（目标+过程）齐全的版本数 */
+  /** 教案关键章节（目标+过程）齐全的版本数（粗粒度，向后兼容） */
   versionsWithCompletePlan: number
-  /** 备课就绪率（0-100） */
+  /** 备课就绪率（0-100，基于就绪等级 ready 计数） */
   readinessPct: number
+  /** G16: 按就绪等级聚合的版本数（含无教案版本，分母为 totalVersions） */
+  readinessBreakdown: { draft: number; partial: number; ready: number }
   /** 近期待上课且备课未就绪的课次（按开始时间升序） */
   upcomingUnprepared: PrepOverviewLesson[]
 }

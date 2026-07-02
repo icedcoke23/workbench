@@ -17,6 +17,7 @@ import { app, dialog } from 'electron'
 import { writeFileSync } from 'fs'
 import { join } from 'path'
 import type { LessonPlan, PlanResource, PrepOverview, PrepOverviewLesson, PrepStage } from '@shared/types'
+import { computePlanReadiness } from '@shared/plan-readiness'
 
 /**
  * AI 辅助生成教案草稿（流式，通过 onChunk 回调推送增量）。
@@ -403,11 +404,14 @@ const PREP_OVERVIEW_DAYS = 7
 
 /**
  * 构建备课进度看板数据：
- * - 单条 SQL 聚合统计全部版本数、已编写教案数、关键章节齐全数，算出就绪率
+ * - 聚合统计全部版本数、已编写教案数、关键章节齐全数（粗粒度，向后兼容）
+ * - G16: 拉取全部教案 + 各教案关联素材数，用共享 computePlanReadiness 计算就绪等级，
+ *   聚合为 draft/partial/ready 三档分布，与编辑器/卡片/授课侧的就绪定义完全一致
  * - 列出近期（默认 7 天）待上课且备课未就绪的课次，按开始时间升序
  *
  * 课次的 prepStage 已由 lessons repo 的 SQL JOIN 派生，此处直接读取，
- * 无需逐课次查询教案，避免 N+1。
+ * 无需逐课次查询教案，避免 N+1。就绪等级在主进程 TS 计算（个人工作台数据量小，
+ * 无需下沉 SQL），保证规则单一来源。
  */
 export function buildPrepOverview(): PrepOverview {
   const row = db()
@@ -424,8 +428,41 @@ export function buildPrepOverview(): PrepOverview {
   const totalVersions = row.total_versions || 0
   const versionsWithPlan = row.versions_with_plan || 0
   const versionsWithCompletePlan = row.versions_complete || 0
-  const readinessPct =
-    totalVersions === 0 ? 0 : Math.round((versionsWithCompletePlan / totalVersions) * 100)
+
+  // G16: 拉取全部教案 + 关联素材数，按就绪等级聚合
+  const plans = db()
+    .prepare(
+      `SELECT lp.objectives, lp.key_points, lp.preparation, lp.process, lp.duration_minutes,
+              (SELECT COUNT(*) FROM plan_resources WHERE plan_id = lp.id) AS resource_count
+       FROM lesson_plans lp`
+    )
+    .all() as Array<{
+    objectives: string | null
+    key_points: string | null
+    preparation: string | null
+    process: string | null
+    duration_minutes: number | null
+    resource_count: number
+  }>
+
+  // 无教案的版本直接归入 draft；有教案的按 computePlanReadiness 定级
+  let draft = totalVersions - versionsWithPlan
+  let partial = 0
+  let ready = 0
+  for (const p of plans) {
+    const r = computePlanReadiness({
+      objectives: p.objectives,
+      keyPoints: p.key_points,
+      preparation: p.preparation,
+      process: p.process,
+      durationMinutes: p.duration_minutes,
+      resourceCount: p.resource_count
+    })
+    if (r.level === 'ready') ready++
+    else if (r.level === 'partial') partial++
+    else draft++
+  }
+  const readinessPct = totalVersions === 0 ? 0 : Math.round((ready / totalVersions) * 100)
 
   const now = new Date()
   const horizon = new Date(now.getTime() + PREP_OVERVIEW_DAYS * 24 * 3_600_000)
@@ -453,6 +490,7 @@ export function buildPrepOverview(): PrepOverview {
     versionsWithPlan,
     versionsWithCompletePlan,
     readinessPct,
+    readinessBreakdown: { draft, partial, ready },
     upcomingUnprepared
   }
 }

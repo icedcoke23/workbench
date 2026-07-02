@@ -163,7 +163,7 @@
             <a-col :xs="24" :sm="12" :md="6">
               <a-statistic
                 title="备课就绪"
-                :value="prepOverview.versionsWithCompletePlan"
+                :value="prepOverview.readinessBreakdown.ready"
                 :value-style="{ color: prepOverview.readinessPct >= 80 ? '#3f8600' : prepOverview.readinessPct >= 50 ? '#d48806' : '#cf1322' }"
                 :suffix="`/ ${prepOverview.totalVersions}`"
               />
@@ -180,6 +180,41 @@
               </div>
             </a-col>
           </a-row>
+
+          <!-- G16: 就绪等级分布堆叠条 -->
+          <div v-if="prepOverview.totalVersions > 0" class="overview-breakdown">
+            <div class="overview-breakdown-bar">
+              <a-tooltip
+                :title="`草稿：${prepOverview.readinessBreakdown.draft} 个版本（无教案或刚起步）`"
+              >
+                <div
+                  class="overview-breakdown-seg seg-draft"
+                  :style="{ width: (prepOverview.readinessBreakdown.draft / prepOverview.totalVersions * 100) + '%' }"
+                />
+              </a-tooltip>
+              <a-tooltip
+                :title="`部分就绪：${prepOverview.readinessBreakdown.partial} 个版本（已写教案但维度不全）`"
+              >
+                <div
+                  class="overview-breakdown-seg seg-partial"
+                  :style="{ width: (prepOverview.readinessBreakdown.partial / prepOverview.totalVersions * 100) + '%' }"
+                />
+              </a-tooltip>
+              <a-tooltip
+                :title="`就绪：${prepOverview.readinessBreakdown.ready} 个版本（多维校验通过）`"
+              >
+                <div
+                  class="overview-breakdown-seg seg-ready"
+                  :style="{ width: (prepOverview.readinessBreakdown.ready / prepOverview.totalVersions * 100) + '%' }"
+                />
+              </a-tooltip>
+            </div>
+            <div class="overview-breakdown-legend">
+              <span class="legend-item"><i class="dot dot-draft" />草稿 {{ prepOverview.readinessBreakdown.draft }}</span>
+              <span class="legend-item"><i class="dot dot-partial" />部分就绪 {{ prepOverview.readinessBreakdown.partial }}</span>
+              <span class="legend-item"><i class="dot dot-ready" />就绪 {{ prepOverview.readinessBreakdown.ready }}</span>
+            </div>
+          </div>
 
           <div
             v-if="prepOverview.upcomingUnprepared.length > 0"
@@ -3555,6 +3590,61 @@ onUnmounted(() => {
 .overview-readiness-label {
   font-size: 12px;
   color: #6b7280;
+}
+
+/* G16: 就绪等级分布堆叠条 */
+.overview-breakdown {
+  margin-top: 12px;
+}
+.overview-breakdown-bar {
+  display: flex;
+  height: 10px;
+  width: 100%;
+  border-radius: 5px;
+  overflow: hidden;
+  background: #f3f4f6;
+}
+.overview-breakdown-seg {
+  height: 100%;
+  min-width: 0;
+  transition: width 0.2s ease;
+}
+.overview-breakdown-seg.seg-draft {
+  background: #ff7875;
+}
+.overview-breakdown-seg.seg-partial {
+  background: #faad14;
+}
+.overview-breakdown-seg.seg-ready {
+  background: #52c41a;
+}
+.overview-breakdown-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.overview-breakdown-legend .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.overview-breakdown-legend .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.overview-breakdown-legend .dot-draft {
+  background: #ff7875;
+}
+.overview-breakdown-legend .dot-partial {
+  background: #faad14;
+}
+.overview-breakdown-legend .dot-ready {
+  background: #52c41a;
 }
 .overview-backlog {
   margin-top: 14px;
