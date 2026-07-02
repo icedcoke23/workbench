@@ -4,7 +4,8 @@ import type { AutoTodoSpec } from '../database/repositories/todos'
 import * as classRepo from '../database/repositories/classes'
 import * as studentRepo from '../database/repositories/students'
 import * as feedbackRepo from '../database/repositories/feedbacks'
-import type { DashboardCharts, DashboardData, Lesson, PrepStage, Todo } from '@shared/types'
+import * as lessonPlanService from './lesson-plan'
+import type { DashboardCharts, DashboardData, Lesson, Todo } from '@shared/types'
 
 /** 备课待办提前窗口（小时）：未来该窗口内备课未完成的课次生成备课待办 */
 const PREP_LEAD_HOURS = 24
@@ -13,18 +14,20 @@ const FEEDBACK_DUE_HOURS = 24
 /** 反思待办有效期（小时）：课次结束后该窗口内未填反思则生成反思待办 */
 const REFLECTION_DUE_HOURS = 48
 
-/** 备课阶段 → 待办标题中标注的具体缺失项；就绪阶段返回空字符串（不生成待办） */
-const PREP_STAGE_LABEL: Record<PrepStage, string> = {
-  'no-version': '待关联备课版本',
-  'no-plan': '待编写教案',
-  'plan-incomplete': '待完善教案',
-  ready: ''
-}
-
-/** 读取课次的备课阶段并返回待办标注文本；阶段已由 SQL JOIN 派生，无需逐课次查询教案 */
-function prepStageLabel(lesson: Lesson): string {
-  const stage = lesson.prepStage ?? 'no-version'
-  return PREP_STAGE_LABEL[stage]
+/**
+ * G25: 读取课次的备课就绪状态并返回待办标注文本；已就绪返回空字符串（不生成待办）。
+ *
+ * 用精确就绪等级（computePlanReadiness，与看板统计同口径）替代粗粒度 SQL
+ * prep_stage（后者仅检查 objectives+process 非空）。无版本/无教案按粗粒度
+ * 直接判定；有教案的用精确等级，避免「统计为 partial 却不生成待办」的矛盾。
+ */
+function prepReadinessLabel(lesson: Lesson): string {
+  const coarse = lesson.prepStage ?? 'no-version'
+  if (coarse === 'no-version') return '待关联备课版本'
+  if (coarse === 'no-plan') return '待编写教案'
+  // plan-incomplete 或 coarse-ready：用精确等级判定是否就绪
+  const level = lessonPlanService.getReadinessLevelForVersion(lesson.ideaVersionId)
+  return level === 'ready' ? '' : '待完善教案'
 }
 
 /** 重新生成自动待办并返回列表 */
@@ -46,11 +49,10 @@ export function regenerateAutoTodos(): Todo[] {
 
   const desired: AutoTodoSpec[] = []
 
-  // 备课待办：未来窗口内备课未完成的课次，按进度阶段标注具体缺失项
+  // 备课待办：未来窗口内备课未完成的课次，按就绪状态标注具体缺失项
   for (const l of upcoming) {
-    const stage = l.prepStage ?? 'no-version'
-    if (stage === 'ready') continue
-    const label = prepStageLabel(l)
+    const label = prepReadinessLabel(l)
+    if (!label) continue // 已就绪，不生成待办
     desired.push({
       type: 'prep',
       refLessonId: l.id,

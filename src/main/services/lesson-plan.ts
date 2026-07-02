@@ -31,6 +31,7 @@ import type {
   PrepStage
 } from '@shared/types'
 import { computePlanReadiness } from '@shared/plan-readiness'
+import type { ReadinessLevel } from '@shared/plan-readiness'
 
 /**
  * AI 辅助生成教案草稿（流式，通过 onChunk 回调推送增量）。
@@ -521,6 +522,45 @@ function computeReadinessBreakdown(): {
 }
 
 /**
+ * 计算指定作品版本关联教案的就绪等级（G25：与 computeReadinessBreakdown 完全同口径）。
+ *
+ * 用于 upcomingUnprepared 与 prep 待办生成，替代粗粒度 SQL prep_stage
+ * （后者仅检查 objectives+process 非空，会把缺 keyPoints/preparation/duration/
+ * 素材/环节平衡的教案误判为 ready），消除「看板统计口径与提醒口径不一致」。
+ *
+ * @param versionId 作品版本 ID；为空或无教案返回 'draft'
+ */
+export function getReadinessLevelForVersion(
+  versionId: string | null | undefined
+): ReadinessLevel {
+  if (!versionId) return 'draft'
+  const row = db()
+    .prepare(
+      `SELECT lp.objectives, lp.key_points, lp.preparation, lp.process, lp.duration_minutes,
+              (SELECT COUNT(*) FROM plan_resources WHERE plan_id = lp.id) AS resource_count
+       FROM lesson_plans lp
+       WHERE lp.idea_version_id = ?`
+    )
+    .get(versionId) as {
+    objectives: string | null
+    key_points: string | null
+    preparation: string | null
+    process: string | null
+    duration_minutes: number | null
+    resource_count: number
+  } | undefined
+  if (!row) return 'draft' // 无教案
+  return computePlanReadiness({
+    objectives: row.objectives,
+    keyPoints: row.key_points,
+    preparation: row.preparation,
+    process: row.process,
+    durationMinutes: row.duration_minutes,
+    resourceCount: row.resource_count
+  }).level
+}
+
+/**
  * 构建备课进度看板数据：
  * - 聚合统计全部版本数、已编写教案数、关键章节齐全数（粗粒度，向后兼容）
  * - G16: 用共享 computeReadinessBreakdown 计算就绪等级分布，
@@ -562,17 +602,30 @@ export function buildPrepOverview(): PrepOverview {
   })
 
   const upcomingUnprepared: PrepOverviewLesson[] = upcoming
-    .filter((l) => l.status === 'pending' && l.prepStage && l.prepStage !== 'ready')
-    .map((l) => ({
-      lessonId: l.id,
-      startTime: l.startTime,
-      endTime: l.endTime,
-      className: l.className,
-      subject: l.subject,
-      ideaTitle: l.ideaTitle,
-      ideaVersionId: l.ideaVersionId,
-      prepStage: l.prepStage as PrepStage
-    }))
+    .filter((l) => l.status === 'pending')
+    .map((l) => {
+      // G25: 用精确就绪等级替代粗粒度 SQL prep_stage，与看板统计同口径。
+      // 无版本/无教案直接判未就绪；有教案的按 computePlanReadiness 定级。
+      const coarse = l.prepStage ?? 'no-version'
+      let stage: PrepStage
+      if (coarse === 'no-version' || coarse === 'no-plan') {
+        stage = coarse
+      } else {
+        // plan-incomplete 或 coarse-ready：统一用精确等级判定展示阶段
+        stage = getReadinessLevelForVersion(l.ideaVersionId) === 'ready' ? 'ready' : 'plan-incomplete'
+      }
+      return {
+        lessonId: l.id,
+        startTime: l.startTime,
+        endTime: l.endTime,
+        className: l.className,
+        subject: l.subject,
+        ideaTitle: l.ideaTitle,
+        ideaVersionId: l.ideaVersionId,
+        prepStage: stage
+      }
+    })
+    .filter((l) => l.prepStage !== 'ready')
     .sort((a, b) => a.startTime.localeCompare(b.startTime))
 
   return {
