@@ -1586,6 +1586,54 @@ onUnmounted(() => {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* 教案关联素材 chip（G13 授课侧一键打开） */
+.prep-plan-resources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.prep-resource-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  height: 24px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: #f0f5ff;
+  border: 1px solid #d6e4ff;
+  color: #1d39c4;
+}
+.prep-resource-chip .chip-type {
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #597ef7;
+  color: #fff;
+}
+.prep-resource-chip.chip-sprite {
+  background: #f6ffed;
+  border-color: #b7eb8f;
+  color: #389e0d;
+}
+.prep-resource-chip.chip-sprite .chip-type {
+  background: #52c41a;
+}
+.prep-resource-chip.chip-sound {
+  background: #fff7e6;
+  border-color: #ffd591;
+  color: #d46b08;
+}
+.prep-resource-chip.chip-sound .chip-type {
+  background: #fa8c16;
+}
+.preview-audio,
+.preview-image {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+}
 .header-row {
   display: flex;
   align-items: center;

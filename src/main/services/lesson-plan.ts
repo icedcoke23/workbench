@@ -16,7 +16,7 @@ import { db } from '../database/db'
 import { app, dialog } from 'electron'
 import { writeFileSync } from 'fs'
 import { join } from 'path'
-import type { LessonPlan, PrepOverview, PrepOverviewLesson, PrepStage } from '@shared/types'
+import type { LessonPlan, PlanResource, PrepOverview, PrepOverviewLesson, PrepStage } from '@shared/types'
 
 /**
  * AI 辅助生成教案草稿（流式，通过 onChunk 回调推送增量）。
@@ -186,8 +186,28 @@ export async function assessAchievement(
   return fullText
 }
 
+/** 资源类型 → 中文标签（导出文档素材清单用） */
+function resourceTypeLabel(t: string): string {
+  if (t === 'backdrop') return '背景'
+  if (t === 'sprite') return '角色'
+  if (t === 'sound') return '音效'
+  return '素材'
+}
+
+/** 将关联素材渲染为 Markdown 列表（追加到教学准备章节末尾） */
+function renderResourcesMd(resources: PlanResource[]): string {
+  if (!resources.length) return ''
+  const lines = resources.map((pr) => {
+    const type = pr.resource ? resourceTypeLabel(pr.resource.type) : '素材'
+    const name = pr.resource?.name ?? '未知素材'
+    const tags = pr.resource?.tags?.length ? `（标签: ${pr.resource.tags.join('、')}）` : ''
+    return `- 【${type}】${name}${tags}`
+  })
+  return `\n\n### 关联素材清单\n\n${lines.join('\n')}\n`
+}
+
 /** 将教案内容渲染为 Markdown 字符串 */
-function buildLessonPlanMarkdown(plan: LessonPlan): string {
+function buildLessonPlanMarkdown(plan: LessonPlan, resources?: PlanResource[]): string {
   const title = plan.title || (plan.versionName ? `${plan.versionName} 教案` : '未命名教案')
   const metaParts: string[] = []
   if (plan.ideaTitle) metaParts.push(`点子：${plan.ideaTitle}`)
@@ -200,13 +220,16 @@ function buildLessonPlanMarkdown(plan: LessonPlan): string {
     return `## ${heading}\n\n${content && content.trim() ? content.trim() : '（未填写）'}\n`
   }
 
+  // 教学准备章节末尾追加结构化素材清单（若有）
+  const prepContent = (plan.preparation ?? '') + (resources && resources.length ? renderResourcesMd(resources) : '')
+
   return `# ${title}
 
 > ${metaParts.join(' · ')}
 
 ${section('教学目标', plan.objectives)}
 ${section('教学重难点', plan.keyPoints)}
-${section('教学准备', plan.preparation)}
+${section('教学准备', prepContent)}
 ${section('教学过程', plan.process)}
 ${section('课后反思', plan.reflection)}
 `
@@ -220,7 +243,8 @@ export async function exportMarkdown(planId: string): Promise<string | null> {
   const plan = lessonPlanRepo.get(planId)
   if (!plan) throw new Error('教案不存在')
 
-  const md = buildLessonPlanMarkdown(plan)
+  const resources = lessonPlanRepo.listResources(planId)
+  const md = buildLessonPlanMarkdown(plan, resources)
   const title = plan.title || (plan.versionName ? `${plan.versionName} 教案` : '未命名教案')
   // 文件名安全化：去除 Windows/Mac 不允许的字符
   const safeName = title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)
@@ -305,7 +329,7 @@ function renderMdSubsetToHtml(md: string): string {
 }
 
 /** 将教案渲染为带样式的完整 HTML，供 printToPDF 使用 */
-function buildLessonPlanHtml(plan: LessonPlan): string {
+function buildLessonPlanHtml(plan: LessonPlan, resources?: PlanResource[]): string {
   const title = plan.title || (plan.versionName ? `${plan.versionName} 教案` : '未命名教案')
   const metaParts: string[] = []
   if (plan.ideaTitle) metaParts.push(`点子：${plan.ideaTitle}`)
@@ -318,6 +342,9 @@ function buildLessonPlanHtml(plan: LessonPlan): string {
     const body = content && content.trim() ? renderMdSubsetToHtml(content.trim()) : '<p class="empty">（未填写）</p>'
     return `<h2>${heading}</h2>\n${body}`
   }
+
+  // 教学准备章节末尾追加结构化素材清单（若有）
+  const prepContent = (plan.preparation ?? '') + (resources && resources.length ? '\n\n' + renderResourcesMd(resources) : '')
 
   return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
     @page { size: A4; margin: 18mm; }
@@ -337,7 +364,7 @@ function buildLessonPlanHtml(plan: LessonPlan): string {
     <div class="meta">${metaParts.join(' · ')}</div>
     ${section('教学目标', plan.objectives)}
     ${section('教学重难点', plan.keyPoints)}
-    ${section('教学准备', plan.preparation)}
+    ${section('教学准备', prepContent)}
     ${section('教学过程', plan.process)}
     ${section('课后反思', plan.reflection)}
   </body></html>`
@@ -362,7 +389,7 @@ export async function exportPdf(planId: string): Promise<string | null> {
   })
   if (res.canceled || !res.filePath) return null
 
-  const html = buildLessonPlanHtml(plan)
+  const html = buildLessonPlanHtml(plan, lessonPlanRepo.listResources(planId))
   const outDir = join(app.getPath('userData'), 'exports')
   const tmpPdf = await pdfService.renderHtmlToPdf(html, outDir, `教案-${safeName}`)
   // renderHtmlToPdf 自带时间戳后缀；复制到用户选择的目标路径
