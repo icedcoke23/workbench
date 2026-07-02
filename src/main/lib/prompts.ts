@@ -261,3 +261,91 @@ ${section('课后反思', plan.reflection)}
 
 请按输出格式给出点评与优化建议。`
 }
+
+// ============ AI 教学目标达成度评估 ============
+
+export function getAchievementAssessmentSystemPrompt(): string {
+  return `你是一位资深的少儿编程教学督导，擅长结合教案预设目标、课堂实际表现数据与教师课后反思，客观评估一节课的教学目标达成度，并给出可操作的改进建议。
+
+## 输出格式（严格使用 Markdown，按以下结构输出，不要前后多余文字）
+
+### 目标达成度总评
+（1-2 句话概括本节课教学目标整体达成情况，给出「达成 / 部分达成 / 未达成」的定性判断）
+
+### 逐条目标评估
+（针对教案「教学目标」中列出的每一条目标，逐一评估达成情况，每条格式为「- 【目标原文摘要】达成度：高/中/低 — 简述依据」，依据需结合课堂表现数据或反思）
+
+### 课堂亮点
+（以「- 」列出 1-3 条本节课表现突出的方面，如学生参与度高、关键目标达成扎实等）
+
+### 待改进点
+（以「- 」列出 1-3 条未达成或薄弱之处，结合具体目标与表现数据指出差距）
+
+### 下次课调整建议
+（2-4 条具体可执行的调整方向，如「将 X 环节时长增加 5 分钟」「针对 Y 学生增加个别辅导」等）
+
+## 评估原则
+- 以教案「教学目标」为评估锚点，逐条对照实际表现
+- 课堂表现数据（积分、点名、参与记录）是客观依据，反思是主观补充，二者结合判断
+- 若反思为空或与表现数据矛盾，以表现数据为主，并在评估中提示
+- 评估要客观中立，避免一味肯定或否定；建议要具体可执行
+- 语言专业简洁，贴合 8-12 岁青少年 Scratch 课堂实际`
+}
+
+export function buildAchievementAssessmentUserMessage(params: {
+  className?: string | null
+  subject?: string | null
+  lessonTime: string
+  ideaTitle?: string | null
+  plan: {
+    objectives?: string | null
+    keyPoints?: string | null
+    process?: string | null
+  }
+  reflection?: string | null
+  records: Array<{ studentName: string; scoreChange: number; isPicked: boolean; note?: string }>
+}): string {
+  const { className, subject, lessonTime, ideaTitle, plan, reflection, records } = params
+  const picked = records.filter((r) => r.isPicked)
+  const scoreList = records
+    .filter((r) => r.scoreChange !== 0)
+    .map(
+      (r) =>
+        `- ${r.studentName}：${r.scoreChange > 0 ? '+' : ''}${r.scoreChange}分${
+          r.note ? `（${r.note}）` : ''
+        }`
+    )
+    .join('\n')
+
+  const planSection =
+    plan.objectives || plan.keyPoints || plan.process
+      ? `### 教学目标\n${plan.objectives?.trim() || '（未填写）'}\n\n### 教学重难点\n${
+          plan.keyPoints?.trim() || '（未填写）'
+        }\n\n### 教学过程概要\n${plan.process?.trim() || '（未填写）'}`
+      : '（未关联教案，请基于课堂表现数据与反思评估）'
+
+  const reflectionSection = reflection?.trim()
+    ? `### 教师课后反思\n${reflection.trim()}`
+    : '### 教师课后反思\n（教师未填写课后反思）'
+
+  return `请评估以下课次的教学目标达成度。
+
+## 课次信息
+- 班级：${className || '未指定'}
+- 科目：${subject || '未指定'}
+- 上课时间：${lessonTime}
+- 关联作品/点子：${ideaTitle || '未指定'}
+
+## 教案内容
+${planSection}
+
+## 课堂表现数据
+- 参与点名学生：${picked.map((r) => r.studentName).join('、') || '无'}
+- 积分变动：
+${scoreList || '无积分记录'}
+- 课堂记录总数：${records.length} 条
+
+## ${reflectionSection}
+
+请按输出格式逐条评估教学目标达成度并给出改进建议。`
+}

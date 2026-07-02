@@ -58,6 +58,16 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('lesson:setReflection', (_e, id, text) =>
     tryRun(() => lessonRepo.setReflection(id, text))
   )
+  ipcMain.handle('lesson:assess', async (e, lessonId) =>
+    tryRunAsync(async () => {
+      const win = BrowserWindow.fromWebContents(e.sender) ?? getMainWindow()
+      const full = await lessonPlanService.assessAchievement(lessonId, (delta) => {
+        win?.webContents.send('lesson:assessChunk', delta)
+      })
+      win?.webContents.send('lesson:assessChunk', '[DONE]')
+      return full
+    })
+  )
   ipcMain.handle('lesson:records', (_e, lessonId) => tryRun(() => lessonRepo.records(lessonId)))
   ipcMain.handle('lesson:score', (_e, action) => tryRun(() => lessonRepo.score(action)))
   ipcMain.handle('lesson:pick', (_e, lessonId) =>

@@ -3,7 +3,9 @@ import {
   buildLessonPlanDraftUserMessage,
   getLessonPlanSystemPrompt,
   buildLessonPlanReviewUserMessage,
-  getLessonPlanReviewSystemPrompt
+  getLessonPlanReviewSystemPrompt,
+  getAchievementAssessmentSystemPrompt,
+  buildAchievementAssessmentUserMessage
 } from '../lib/prompts'
 import * as scratchService from './scratch'
 import * as pdfService from './pdf'
@@ -107,6 +109,79 @@ export async function reviewPlan(
     (delta) => onChunk?.(delta),
     0.6
   )
+
+  return fullText
+}
+
+/**
+ * AI 教学目标达成度评估（流式，通过 onChunk 回调推送增量）。
+ *
+ * 汇聚指定课次的教案目标 + 课堂表现记录（积分/点名）+ 教师课后反思，
+ * 调用 AI 逐条评估教学目标达成度并给出改进建议。生成完成后落库到
+ * lessons.achievement_assessment，避免重复生成。
+ *
+ * @param lessonId 课次 ID
+ * @param onChunk 流式增量回调
+ */
+export async function assessAchievement(
+  lessonId: string,
+  onChunk?: (delta: string) => void
+): Promise<string> {
+  const settings = resolveAISettings()
+  if (!settings) throw new Error('AI 未配置，请在设置中配置第三方 AI 参数')
+
+  const lesson = lessonRepo.get(lessonId)
+  if (!lesson) throw new Error('课次不存在')
+  if (lesson.status !== 'finished') {
+    throw new Error('仅已结课的课次可进行达成度评估')
+  }
+
+  // 拉取关联教案（目标/重难点/过程）作为评估锚点
+  let plan: LessonPlan | null = null
+  if (lesson.ideaVersionId) {
+    plan = lessonPlanRepo.getByVersion(lesson.ideaVersionId)
+  }
+
+  // 拉取课堂记录（积分/点名/参与备注）作为客观依据
+  const records = lessonRepo.records(lessonId).map((r) => ({
+    studentName: r.studentName ?? '未命名学生',
+    scoreChange: r.scoreChange,
+    isPicked: r.isPicked,
+    note: r.participationNote ?? undefined
+  }))
+
+  const lessonTime = `${lesson.startTime.slice(0, 16).replace('T', ' ')} ~ ${lesson.endTime
+    .slice(11, 16)
+    .replace('T', ' ')}`
+
+  const userMessage = buildAchievementAssessmentUserMessage({
+    className: lesson.className,
+    subject: lesson.subject,
+    lessonTime,
+    ideaTitle: lesson.ideaTitle,
+    plan: plan
+      ? {
+          objectives: plan.objectives,
+          keyPoints: plan.keyPoints,
+          process: plan.process
+        }
+      : {},
+    reflection: lesson.reflection,
+    records
+  })
+
+  const fullText = await streamAI(
+    settings,
+    [
+      { role: 'system', content: getAchievementAssessmentSystemPrompt() },
+      { role: 'user', content: sanitizeUserInput(userMessage, 6000) }
+    ],
+    (delta) => onChunk?.(delta),
+    0.5
+  )
+
+  // 落库：流式输出完成后持久化评估结果
+  lessonRepo.setAchievementAssessment(lessonId, fullText)
 
   return fullText
 }

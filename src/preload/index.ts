@@ -40,6 +40,11 @@ const events = {
     ipcRenderer.on('lessonPlan:reviewChunk', listener)
     return () => ipcRenderer.removeListener('lessonPlan:reviewChunk', listener)
   },
+  'lesson:assessChunk': (cb: (delta: string) => void) => {
+    const listener = (_e: IpcRendererEvent, delta: string) => cb(delta)
+    ipcRenderer.on('lesson:assessChunk', listener)
+    return () => ipcRenderer.removeListener('lesson:assessChunk', listener)
+  },
   'sync:status': (cb: (status: unknown) => void) => {
     const listener = (_e: IpcRendererEvent, status: unknown) => cb(status)
     ipcRenderer.on('sync:status', listener)

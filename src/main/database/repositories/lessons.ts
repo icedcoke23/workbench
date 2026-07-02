@@ -13,6 +13,8 @@ interface LessonRow {
   feedback_sent: number
   reflection: string | null
   reflected_at: string | null
+  achievement_assessment: string | null
+  assessment_at: string | null
   created_at: string
   prep_stage?: string | null
 }
@@ -53,7 +55,9 @@ function mapRow(r: JoinedLessonRow): Lesson {
     subject: r.subject,
     prepStage: (r.prep_stage as PrepStage | null) ?? undefined,
     reflection: r.reflection ?? null,
-    reflectedAt: r.reflected_at ?? null
+    reflectedAt: r.reflected_at ?? null,
+    achievementAssessment: r.achievement_assessment ?? null,
+    assessmentAt: r.assessment_at ?? null
   }
 }
 
@@ -134,6 +138,21 @@ export function setReflection(id: string, text: string | null): Lesson | null {
   db()
     .prepare(`UPDATE lessons SET reflection = ?, reflected_at = ? WHERE id = ?`)
     .run(trimmed, reflectedAt, id)
+  return get(id)
+}
+
+/**
+ * 写入 AI 教学目标达成度评估结果。
+ * - text 为空/null 视为清空评估（同时清空 assessment_at）
+ * - 非空时记录 assessment_at 为当前时间
+ * 返回更新后的课次；课次不存在返回 null
+ */
+export function setAchievementAssessment(id: string, text: string | null): Lesson | null {
+  const trimmed = text?.trim() || null
+  const assessmentAt = trimmed ? now() : null
+  db()
+    .prepare(`UPDATE lessons SET achievement_assessment = ?, assessment_at = ? WHERE id = ?`)
+    .run(trimmed, assessmentAt, id)
   return get(id)
 }
 

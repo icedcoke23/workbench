@@ -458,6 +458,39 @@
         :rows="8"
         placeholder="记录本节课的教学反思：目标达成情况、学生掌握程度、可改进之处、下次调整方向…"
       />
+
+      <!-- AI 教学目标达成度评估（仅编辑模式） -->
+      <template v-if="reflectionMode === 'edit'">
+        <a-divider style="margin: 16px 0 12px">
+          <ThunderboltOutlined /> AI 教学目标达成度评估
+        </a-divider>
+        <div class="assessment-toolbar">
+          <a-button
+            type="primary"
+            size="small"
+            :loading="assessing"
+            :disabled="!reflectionForm.text.trim()"
+            @click="runAssessment"
+          >
+            <ThunderboltOutlined /> {{ assessmentText ? '重新评估' : '生成达成度评估' }}
+          </a-button>
+          <span v-if="assessmentAt" class="assessment-time">
+            生成于 {{ formatAssessmentTime(assessmentAt) }}
+          </span>
+        </div>
+        <div v-if="assessing || assessmentText" class="assessment-output">
+          <a-spin v-if="assessing && !assessmentText" size="small" />
+          <pre class="assessment-text">{{ assessmentText }}</pre>
+        </div>
+        <a-alert
+          v-else
+          type="info"
+          show-icon
+          message="填写反思后点击「生成达成度评估」"
+          description="AI 将结合教案目标、课堂表现数据（积分/点名）与你的反思，逐条评估教学目标达成度并给出下次课调整建议。"
+          style="margin-top: 8px"
+        />
+      </template>
     </a-modal>
   </div>
 </template>
@@ -726,6 +759,12 @@ const reflectionForm = reactive({
   lessonTitle: '' as string
 })
 
+// AI 教学目标达成度评估（在反思 Modal 编辑模式下展示）
+const assessing = ref(false)
+const assessmentText = ref('')
+const assessmentAt = ref<string | null>(null)
+let offAssessChunk: (() => void) | null = null
+
 // 课次手动管理 Modal 状态
 const lessonModalVisible = ref(false)
 const lessonSubmitting = ref(false)
@@ -771,6 +810,11 @@ const currentClassName = computed(
 // ============ 工具函数 ============
 function fmtTime(iso: string): string {
   return dayjs(iso).format('HH:mm')
+}
+
+/** 格式化达成度评估生成时间 */
+function formatAssessmentTime(iso: string): string {
+  return dayjs(iso).format('YYYY-MM-DD HH:mm')
 }
 
 function statusText(s: Lesson['status']): string {
@@ -1205,6 +1249,9 @@ async function openReflectionForLesson(l: Lesson): Promise<void> {
   reflectionForm.text = l.reflection || ''
   reflectionForm.lessonTitle = l.subject || l.className || '当前课次'
   prepPlan.value = null
+  // 重置达成度评估展示：从课次已有数据恢复，无则留空
+  assessmentText.value = l.achievementAssessment || ''
+  assessmentAt.value = l.assessmentAt || null
   if (l.ideaVersionId) {
     try {
       prepPlan.value = (await call(window.api.lessonPlan.getByVersion(l.ideaVersionId))) ?? null
@@ -1230,6 +1277,43 @@ async function saveReflectionEdit(): Promise<void> {
     message.error(String(e))
   } finally {
     reflectionSubmitting.value = false
+  }
+}
+
+/**
+ * 触发 AI 教学目标达成度评估（流式）。
+ * 仅在编辑模式下可用；需先填写反思以提供更准确的评估上下文。
+ * 评估结果流式展示并最终落库。
+ */
+async function runAssessment(): Promise<void> {
+  if (!reflectionForm.lessonId || assessing.value) return
+  if (!reflectionForm.text.trim()) {
+    message.warning('请先填写课后反思，再进行达成度评估')
+    return
+  }
+  assessing.value = true
+  assessmentText.value = ''
+  // 订阅流式增量
+  offAssessChunk?.()
+  offAssessChunk = window.events['lesson:assessChunk']((delta: string) => {
+    if (delta === '[DONE]') return
+    assessmentText.value += delta
+  })
+  try {
+    // 先保存当前反思，保证评估基于最新内容
+    await call(
+      window.api.lesson.setReflection(reflectionForm.lessonId, reflectionForm.text.trim() || null)
+    )
+    await call(window.api.lesson.assess(reflectionForm.lessonId))
+    assessmentAt.value = new Date().toISOString()
+    message.success('达成度评估已生成并保存')
+    await loadLessons()
+  } catch (e) {
+    message.error(String(e))
+  } finally {
+    assessing.value = false
+    offAssessChunk?.()
+    offAssessChunk = null
   }
 }
 
@@ -1260,6 +1344,8 @@ let offRefresh: (() => void) | null = null
 onUnmounted(() => {
   offRefresh?.()
   offRefresh = null
+  offAssessChunk?.()
+  offAssessChunk = null
 })
 </script>
 
@@ -1547,6 +1633,33 @@ onUnmounted(() => {
 .reflection-obj-text {
   color: #4b5563;
   white-space: pre-wrap;
+}
+.assessment-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.assessment-time {
+  font-size: 12px;
+  color: #9ca3af;
+}
+.assessment-output {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: #f6f8fa;
+  border-radius: 6px;
+  border-left: 3px solid #722ed1;
+}
+.assessment-text {
+  margin: 0;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>
 
