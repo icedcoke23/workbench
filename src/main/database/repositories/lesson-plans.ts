@@ -1,5 +1,13 @@
-import { db, uuid } from '../db'
-import type { LessonPlan, LessonPlanCloneInput, LessonPlanInput } from '@shared/types'
+import { db, uuid, parseJSON } from '../db'
+import type {
+  LessonPlan,
+  LessonPlanCloneInput,
+  LessonPlanInput,
+  PlanResource,
+  PlanResourceAttachInput,
+  Resource,
+  ResourceType
+} from '@shared/types'
 import * as ideaRepo from './ideas'
 
 interface LessonPlanRow {
@@ -139,7 +147,7 @@ export function clonePlan(sourcePlanId: string, input: LessonPlanCloneInput): Le
         ? `${source.title}（副本）`
         : null
 
-  return upsert({
+  const cloned = upsert({
     ideaVersionId: version.id,
     title: newTitle,
     objectives: source.objectives,
@@ -149,6 +157,19 @@ export function clonePlan(sourcePlanId: string, input: LessonPlanCloneInput): Le
     reflection: null,
     durationMinutes: source.durationMinutes
   })
+
+  // 一并复制结构化素材关联：派生教案通常需要相同的素材
+  const sourceResources = listResources(sourcePlanId)
+  for (const pr of sourceResources) {
+    db()
+      .prepare(
+        `INSERT OR IGNORE INTO plan_resources (id, plan_id, resource_id, section, sort_order, note)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(uuid(), cloned.id, pr.resourceId, pr.section, pr.sortOrder, pr.note)
+  }
+
+  return cloned
 }
 
 export function get(id: string): LessonPlan | null {
@@ -235,4 +256,122 @@ export function upsert(input: LessonPlanInput): LessonPlan {
 
 export function remove(id: string): void {
   db().prepare(`DELETE FROM lesson_plans WHERE id = ?`).run(id)
+}
+
+// ============ 教案-资源结构化关联（G13） ============
+
+interface PlanResourceRow {
+  id: string
+  plan_id: string
+  resource_id: string
+  section: string
+  sort_order: number
+  note: string | null
+  created_at: string
+  // JOIN resources 带出的字段
+  r_name: string
+  r_type: string
+  r_file_path: string
+  r_tags: string
+  r_class_id: string | null
+  r_created_at: string
+}
+
+function mapPlanResourceRow(r: PlanResourceRow): PlanResource {
+  const resource: Resource = {
+    id: r.resource_id,
+    name: r.r_name,
+    type: r.r_type as ResourceType,
+    filePath: r.r_file_path,
+    tags: parseJSON<string[]>(r.r_tags, []),
+    classId: r.r_class_id,
+    createdAt: r.r_created_at
+  }
+  return {
+    id: r.id,
+    planId: r.plan_id,
+    resourceId: r.resource_id,
+    section: r.section,
+    sortOrder: r.sort_order,
+    note: r.note,
+    createdAt: r.created_at,
+    resource
+  }
+}
+
+/**
+ * 列出教案关联的全部结构化素材（JOIN resources 带出文件信息）。
+ * 按 section 分组、sort_order 升序排列，便于前端按章节渲染。
+ */
+export function listResources(planId: string): PlanResource[] {
+  const rows = db()
+    .prepare(
+      `SELECT pr.id, pr.plan_id, pr.resource_id, pr.section, pr.sort_order, pr.note, pr.created_at,
+              r.name AS r_name, r.type AS r_type, r.file_path AS r_file_path,
+              r.tags AS r_tags, r.class_id AS r_class_id, r.created_at AS r_created_at
+       FROM plan_resources pr
+       JOIN resources r ON r.id = pr.resource_id
+       WHERE pr.plan_id = ?
+       ORDER BY pr.section ASC, pr.sort_order ASC, pr.created_at ASC`
+    )
+    .all(planId) as PlanResourceRow[]
+  return rows.map(mapPlanResourceRow)
+}
+
+/**
+ * 挂载素材到教案（幂等：UNIQUE(plan_id, resource_id, section) 冲突时更新 sortOrder/note）。
+ * section 默认 'preparation'。
+ */
+export function attachResource(planId: string, input: PlanResourceAttachInput): PlanResource {
+  const section = input.section?.trim() || 'preparation'
+  const sortOrder = input.sortOrder ?? 0
+  const note = input.note?.trim() || null
+  const id = uuid()
+  db()
+    .prepare(
+      `INSERT INTO plan_resources (id, plan_id, resource_id, section, sort_order, note)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(plan_id, resource_id, section) DO UPDATE SET
+         sort_order = excluded.sort_order,
+         note = excluded.note`
+    )
+    .run(id, planId, input.resourceId, section, sortOrder, note)
+  const row = db()
+    .prepare(
+      `SELECT pr.id, pr.plan_id, pr.resource_id, pr.section, pr.sort_order, pr.note, pr.created_at,
+              r.name AS r_name, r.type AS r_type, r.file_path AS r_file_path,
+              r.tags AS r_tags, r.class_id AS r_class_id, r.created_at AS r_created_at
+       FROM plan_resources pr
+       JOIN resources r ON r.id = pr.resource_id
+       WHERE pr.id = ?`
+    )
+    .get(id) as PlanResourceRow
+  return mapPlanResourceRow(row)
+}
+
+/** 解除素材关联（不删资源本身）。section 为空时删除该资源在该教案下的全部 section 关联。 */
+export function detachResource(
+  planId: string,
+  resourceId: string,
+  section?: string
+): void {
+  if (section && section.trim()) {
+    db()
+      .prepare(
+        `DELETE FROM plan_resources WHERE plan_id = ? AND resource_id = ? AND section = ?`
+      )
+      .run(planId, resourceId, section.trim())
+  } else {
+    db()
+      .prepare(`DELETE FROM plan_resources WHERE plan_id = ? AND resource_id = ?`)
+      .run(planId, resourceId)
+  }
+}
+
+/** 统计某资源被多少份教案引用（删除资源前给前端提示用） */
+export function countPlanUsageOfResource(resourceId: string): number {
+  const row = db()
+    .prepare(`SELECT COUNT(*) AS n FROM plan_resources WHERE resource_id = ?`)
+    .get(resourceId) as { n: number }
+  return row?.n ?? 0
 }

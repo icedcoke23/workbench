@@ -240,8 +240,22 @@
                 <a-collapse-panel v-if="prepPlan.keyPoints" key="keyPoints" header="教学重难点">
                   <div class="prep-plan-text">{{ prepPlan.keyPoints }}</div>
                 </a-collapse-panel>
-                <a-collapse-panel v-if="prepPlan.preparation" key="preparation" header="教学准备">
-                  <div class="prep-plan-text">{{ prepPlan.preparation }}</div>
+                <a-collapse-panel v-if="prepPlan.preparation || prepPlanResources.length" key="preparation" header="教学准备">
+                  <div v-if="prepPlanResources.length" class="prep-plan-resources">
+                    <a-button
+                      v-for="pr in prepPlanResources"
+                      :key="pr.id"
+                      size="small"
+                      class="prep-resource-chip"
+                      :class="`chip-${pr.resource?.type ?? 'default'}`"
+                      :loading="prepPlanResourcesLoading"
+                      @click="openPlanResource(pr)"
+                    >
+                      <span class="chip-type">{{ pr.resource?.type ? resourceTypeText[pr.resource.type] : '素材' }}</span>
+                      <span class="chip-name">{{ pr.resource?.name ?? '未知素材' }}</span>
+                    </a-button>
+                  </div>
+                  <div v-if="prepPlan.preparation" class="prep-plan-text">{{ prepPlan.preparation }}</div>
                 </a-collapse-panel>
                 <a-collapse-panel v-if="prepPlan.process" key="process" header="教学过程">
                   <div class="prep-plan-text">{{ prepPlan.process }}</div>
@@ -492,6 +506,24 @@
         />
       </template>
     </a-modal>
+
+    <!-- 教案关联素材预览（G13 授课侧一键打开） -->
+    <a-modal
+      v-model:open="resourcePreviewVisible"
+      :title="`素材预览 - ${resourcePreviewTitle}`"
+      :footer="null"
+      :width="520"
+    >
+      <a-spin :spinning="resourcePreviewLoading">
+        <a-empty v-if="!resourcePreviewUrl" description="正在加载素材…" />
+        <div v-else-if="resourcePreviewType === 'sound'" class="preview-audio">
+          <audio :src="resourcePreviewUrl" controls style="width: 100%"></audio>
+        </div>
+        <div v-else class="preview-image">
+          <a-image :src="resourcePreviewUrl" :width="460" />
+        </div>
+      </a-spin>
+    </a-modal>
   </div>
 </template>
 
@@ -522,6 +554,8 @@ import type {
   Lesson,
   LessonInput,
   LessonPlan,
+  PlanResource,
+  ResourceType,
   Student,
   VersionMeta,
   DocLinkWithLesson
@@ -747,6 +781,15 @@ const prepDocsLoading = ref(false)
 const prepPlan = ref<LessonPlan | null>(null)
 const prepPlanLoading = ref(false)
 const prepPlanActiveKeys = ref<string[]>(['process'])
+// 教案关联的结构化素材（G13）：授课侧一键预览/打开
+const prepPlanResources = ref<PlanResource[]>([])
+const prepPlanResourcesLoading = ref(false)
+// 素材预览 Modal
+const resourcePreviewVisible = ref(false)
+const resourcePreviewLoading = ref(false)
+const resourcePreviewTitle = ref('')
+const resourcePreviewUrl = ref('')
+const resourcePreviewType = ref<ResourceType | ''>('')
 
 // 课后反思 Modal（课次结束引导填写 / 历史课次补填）
 // 反思按 per-lesson 存储：lessonId 标识当前反思所属课次
@@ -1001,6 +1044,7 @@ async function loadPrepContext(): Promise<void> {
   prepVersionMeta.value = null
   prepPlan.value = null
   prepDocs.value = []
+  prepPlanResources.value = []
   if (!versionId && !lessonId) return
 
   // 并行加载，互不阻塞
@@ -1013,7 +1057,17 @@ async function loadPrepContext(): Promise<void> {
 
     prepPlanLoading.value = true
     call(window.api.lessonPlan.getByVersion(versionId))
-      .then((p) => { prepPlan.value = p ?? null })
+      .then((p) => {
+        prepPlan.value = p ?? null
+        // 教案存在时并行拉取关联素材（G13）
+        if (p) {
+          prepPlanResourcesLoading.value = true
+          call(window.api.lessonPlan.listResources(p.id))
+            .then((rs) => { prepPlanResources.value = rs })
+            .catch(() => { prepPlanResources.value = [] })
+            .finally(() => { prepPlanResourcesLoading.value = false })
+        }
+      })
       .catch(() => { prepPlan.value = null })
       .finally(() => { prepPlanLoading.value = false })
   }
@@ -1035,6 +1089,38 @@ async function loadPrepContext(): Promise<void> {
       })
       .catch(() => { prepDocs.value = [] })
       .finally(() => { prepDocsLoading.value = false })
+  }
+}
+
+/** 资源类型 → 中文标签（chip 展示用） */
+const resourceTypeText: Record<ResourceType, string> = {
+  backdrop: '背景',
+  sprite: '角色',
+  sound: '音效'
+}
+
+/**
+ * 一键预览/打开教案关联素材（G13 授课侧核心）：
+ * 读取文件为 data URL，背景/角色显示图片，音效播放音频。
+ * 教师上课时无需 alt-tab 翻文件夹，点击 chip 即可看到素材。
+ */
+async function openPlanResource(pr: PlanResource): Promise<void> {
+  if (!pr.resource) {
+    message.warning('素材信息缺失')
+    return
+  }
+  resourcePreviewTitle.value = pr.resource.name
+  resourcePreviewUrl.value = ''
+  resourcePreviewType.value = pr.resource.type
+  resourcePreviewVisible.value = true
+  resourcePreviewLoading.value = true
+  try {
+    const dataUrl = await call(window.api.resource.readFile(pr.resource.filePath))
+    resourcePreviewUrl.value = dataUrl
+  } catch (e) {
+    message.error(`预览失败：${String(e instanceof Error ? e.message : e)}`)
+  } finally {
+    resourcePreviewLoading.value = false
   }
 }
 

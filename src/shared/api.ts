@@ -19,6 +19,8 @@ import type {
   LessonPlanInput,
   LessonPlanCloneInput,
   LessonPlanTemplateRecord,
+  PlanResource,
+  PlanResourceAttachInput,
   LessonPlanTemplateRecordInput,
   LessonRecord,
   MenuAction,
@@ -48,7 +50,7 @@ export const API_METHODS: Record<string, string[]> = {
   class: ['list', 'get', 'create', 'update', 'remove', 'members', 'addMembers', 'removeMember'],
   lesson: ['list', 'get', 'create', 'update', 'remove', 'finish', 'setReflection', 'assess', 'records', 'score', 'pick'],
   idea: ['list', 'get', 'create', 'update', 'remove', 'createVersion', 'updateVersion', 'removeVersion', 'getVersionMeta'],
-  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'clone', 'generateDraft', 'exportMarkdown', 'exportPdf', 'prepOverview', 'review'],
+  lessonPlan: ['list', 'get', 'getByVersion', 'upsert', 'remove', 'clone', 'generateDraft', 'exportMarkdown', 'exportPdf', 'prepOverview', 'review', 'listResources', 'attachResource', 'detachResource'],
   lessonPlanTemplate: ['list', 'create', 'update', 'remove'],
   todo: ['list', 'create', 'update', 'remove', 'regenerate'],
   resource: ['list', 'create', 'update', 'remove', 'importFile', 'allTags', 'readFile'],
@@ -125,6 +127,9 @@ export interface WorkbenchAPI {
     upsert: (input: LessonPlanInput) => Promise<Result<LessonPlan>>
     remove: (id: ID) => Promise<Result<void>>
     clone: (sourcePlanId: ID, input: LessonPlanCloneInput) => Promise<Result<LessonPlan>>
+    listResources: (planId: ID) => Promise<Result<PlanResource[]>>
+    attachResource: (planId: ID, input: PlanResourceAttachInput) => Promise<Result<PlanResource>>
+    detachResource: (planId: ID, resourceId: ID, section?: string) => Promise<Result<void>>
     generateDraft: (versionId: ID, durationMinutes?: number | null) => Promise<Result<string>>
     exportMarkdown: (id: ID) => Promise<Result<string | null>>
     exportPdf: (id: ID) => Promise<Result<string | null>>

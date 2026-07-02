@@ -876,6 +876,26 @@
               </a-button>
               <span class="segment-toolbar-hint">从资源库选择素材，插入到此处作为准备清单</span>
             </div>
+            <!-- 已挂载素材 chip 列表（G13）：结构化关联，授课侧可一键打开 -->
+            <div v-if="allPlanResources.length" class="plan-resource-chips">
+              <span
+                v-for="pr in allPlanResources"
+                :key="pr.id"
+                class="plan-resource-chip"
+                :class="`chip-${pr.resource?.type ?? 'default'}`"
+              >
+                <span class="chip-type">{{ pr.resource?.type ? resourceTypeText[pr.resource.type] : '素材' }}</span>
+                <span class="chip-name">{{ pr.resource?.name ?? '未知素材' }}</span>
+                <a-button
+                  type="text"
+                  size="small"
+                  class="chip-remove"
+                  @click="removePlanResource(pr)"
+                >
+                  <CloseOutlined />
+                </a-button>
+              </span>
+            </div>
             <a-textarea
               ref="preparationTextareaRef"
               v-model:value="planForm.preparation"
@@ -1214,7 +1234,8 @@ import {
   FilePdfOutlined,
   SnippetsOutlined,
   BankOutlined,
-  TagOutlined
+  TagOutlined,
+  CloseOutlined
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
@@ -1240,6 +1261,7 @@ import type {
   LessonPlan,
   LessonPlanInput,
   LessonPlanCloneInput,
+  PlanResource,
   LessonPlanTemplateRecord,
   LessonPlanTemplateRecordInput,
   PrepOverview,
@@ -1344,6 +1366,18 @@ const planEditorVersionHasPlan = ref(false)
 const planSubmitting = ref(false)
 /** 当前编辑中的教案 ID（仅编辑已有教案时有值，供 AI 优化建议使用） */
 const editingPlanId = ref<string | null>(null)
+// 教案-资源结构化关联（G13）：编辑器内展示的已挂载素材 chip
+const planResources = ref<PlanResource[]>([])
+/**
+ * 新建态未保存时缓存的待挂载资源（保存成功后批量 attach）。
+ * 存 PlanResource 形状（合成 id 以 pending: 前缀），便于与已挂载项统一渲染 chip。
+ */
+const pendingAttachResources = ref<PlanResource[]>([])
+/** 编辑器内展示的全部素材 chip（已挂载 + 待挂载），用于统一渲染 */
+const allPlanResources = computed<PlanResource[]>(() => [
+  ...planResources.value,
+  ...pendingAttachResources.value
+])
 // AI 辅助生成教案草稿
 const planAiGenerating = ref(false)
 const aiConfigured = ref(false)
@@ -1671,6 +1705,8 @@ function resetPlanForm(): void {
   planEditorVersionHasPlan.value = false
   editingPlanId.value = null
   planReviewText.value = ''
+  planResources.value = []
+  pendingAttachResources.value = []
 }
 
 function openNewPlanModal(): void {
@@ -1810,8 +1846,13 @@ function openResourcePicker(): void {
   loadResourcePicker()
 }
 
-/** 将选中的资源以 Markdown 列表项插入「教学准备」光标处 */
-function insertResource(res: Resource): void {
+/**
+ * 将选中的资源以 Markdown 列表项插入「教学准备」光标处，
+ * 同时建立结构化关联（双轨兼容）：
+ * - 编辑态（editingPlanId 有值）：直接 attachResource 落库并刷新 chip 列表
+ * - 新建态：缓存到 pendingAttachResources，submitPlan 后批量 attach
+ */
+async function insertResource(res: Resource): Promise<void> {
   const typeText = res.type === 'backdrop' ? '背景' : res.type === 'sprite' ? '角色' : '音效'
   const tagPart = res.tags && res.tags.length ? `（标签: ${res.tags.join('、')}）` : ''
   const line = `- 【${typeText}】${res.name}${tagPart}`
@@ -1832,6 +1873,57 @@ function insertResource(res: Resource): void {
       el.focus()
       el.setSelectionRange(pos, pos)
     })
+  }
+  // 结构化关联：避免同一资源重复挂载
+  const alreadyAttached = planResources.value.some((pr) => pr.resourceId === res.id)
+  const alreadyPending = pendingAttachResources.value.some((pr) => pr.resourceId === res.id)
+  if (alreadyAttached || alreadyPending) return
+  if (editingPlanId.value) {
+    try {
+      const attached = await call(
+        window.api.lessonPlan.attachResource(editingPlanId.value, {
+          resourceId: res.id,
+          section: 'preparation'
+        })
+      )
+      planResources.value = [...planResources.value, attached]
+    } catch (e) {
+      message.error(`关联素材失败：${String(e instanceof Error ? e.message : e)}`)
+    }
+  } else {
+    // 新建态：合成 pending PlanResource（带资源快照）便于 chip 渲染
+    const synthetic: PlanResource = {
+      id: `pending:${res.id}`,
+      planId: '',
+      resourceId: res.id,
+      section: 'preparation',
+      sortOrder: pendingAttachResources.value.length,
+      note: null,
+      createdAt: new Date().toISOString(),
+      resource: res
+    }
+    pendingAttachResources.value = [...pendingAttachResources.value, synthetic]
+  }
+}
+
+/** 移除已挂载素材：编辑态调用 detachResource，新建态从 pending 列表移除 */
+async function removePlanResource(pr: PlanResource): Promise<void> {
+  if (pr.id.startsWith('pending:')) {
+    pendingAttachResources.value = pendingAttachResources.value.filter(
+      (r) => r.id !== pr.id
+    )
+    return
+  }
+  if (editingPlanId.value) {
+    try {
+      await call(
+        window.api.lessonPlan.detachResource(editingPlanId.value, pr.resourceId, pr.section)
+      )
+    } catch (e) {
+      message.error(`移除素材失败：${String(e instanceof Error ? e.message : e)}`)
+      return
+    }
+    planResources.value = planResources.value.filter((r) => r.id !== pr.id)
   }
 }
 
@@ -1855,6 +1947,8 @@ async function openPlanForVersion(versionId: string): Promise<void> {
       planForm.process = existing.process ?? ''
       planForm.reflection = existing.reflection ?? ''
       planForm.durationMinutes = existing.durationMinutes ?? null
+      // 加载已挂载的结构化素材 chip
+      planResources.value = await call(window.api.lessonPlan.listResources(existing.id))
     }
   } catch (e) {
     message.error(`加载教案失败：${String(e instanceof Error ? e.message : e)}`)
@@ -1918,6 +2012,26 @@ async function submitPlan(): Promise<void> {
     const saved = await call(window.api.lessonPlan.upsert(input))
     editingPlanId.value = saved.id
     planEditorIsEdit.value = true
+    // 新建态缓存的待挂载素材：保存成功后批量 attach 到新教案
+    if (pendingAttachResources.value.length > 0) {
+      try {
+        const attached: PlanResource[] = []
+        for (const pr of pendingAttachResources.value) {
+          const a = await call(
+            window.api.lessonPlan.attachResource(saved.id, {
+              resourceId: pr.resourceId,
+              section: pr.section,
+              sortOrder: pr.sortOrder
+            })
+          )
+          attached.push(a)
+        }
+        planResources.value = attached
+      } catch (e) {
+        message.error(`素材关联失败：${String(e instanceof Error ? e.message : e)}`)
+      }
+      pendingAttachResources.value = []
+    }
     message.success(wasEdit ? '教案已保存' : '教案已创建')
     planEditorVisible.value = false
     await loadPlans()
@@ -3207,6 +3321,56 @@ onUnmounted(() => {
 .segment-toolbar-hint {
   font-size: 12px;
   color: #9ca3af;
+}
+/* 教案-资源关联 chip（G13） */
+.plan-resource-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.plan-resource-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: #f0f5ff;
+  border: 1px solid #d6e4ff;
+  color: #1d39c4;
+}
+.plan-resource-chip .chip-type {
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #597ef7;
+  color: #fff;
+}
+.plan-resource-chip.chip-sprite {
+  background: #f6ffed;
+  border-color: #b7eb8f;
+  color: #389e0d;
+}
+.plan-resource-chip.chip-sprite .chip-type {
+  background: #52c41a;
+}
+.plan-resource-chip.chip-sound {
+  background: #fff7e6;
+  border-color: #ffd591;
+  color: #d46b08;
+}
+.plan-resource-chip.chip-sound .chip-type {
+  background: #fa8c16;
+}
+.plan-resource-chip .chip-remove {
+  padding: 0 2px;
+  height: 18px;
+  font-size: 11px;
+  color: #9ca3af;
+}
+.plan-resource-chip .chip-remove:hover {
+  color: #ff4d4f;
 }
 .segment-menu-item {
   display: flex;

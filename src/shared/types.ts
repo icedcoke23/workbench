@@ -126,6 +126,31 @@ export interface LessonPlan {
   usedClasses?: string[]
   /** 使用该教案的科目集合（list 时按需聚合） */
   usedSubjects?: string[]
+  /** 关联的结构化素材列表（get/getByVersion 时按需附带，list 不附带） */
+  resources?: PlanResource[]
+}
+/**
+ * 教案关联的结构化素材（plan_resources 表）。
+ * 与 preparation 文本里的 Markdown 死引用双轨共存：本字段为授课侧一键打开提供完整文件信息。
+ */
+export interface PlanResource {
+  id: ID
+  planId: ID
+  resourceId: ID
+  /** 关联到教案的哪个章节，默认 preparation */
+  section: string
+  sortOrder: number
+  note?: string | null
+  createdAt: string
+  /** 资源快照（JOIN resources 表带出，便于前端直接渲染无需二次查询） */
+  resource?: Resource
+}
+/** 挂载素材到教案的入参 */
+export interface PlanResourceAttachInput {
+  resourceId: ID
+  section?: string
+  sortOrder?: number
+  note?: string | null
 }
 export interface LessonPlanInput {
   ideaVersionId: ID

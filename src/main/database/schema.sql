@@ -146,6 +146,24 @@ CREATE TABLE IF NOT EXISTS resources (
 );
 CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type);
 
+-- 教案-资源关联（一等附件，区别于 preparation 文本里的死引用）
+-- 双轨兼容：保留 preparation Markdown 文本插入（向后兼容），
+-- 同时通过本表建立结构化关联，授课侧可一键打开素材。
+CREATE TABLE IF NOT EXISTS plan_resources (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  section TEXT DEFAULT 'preparation',
+  sort_order INTEGER DEFAULT 0,
+  note TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (plan_id) REFERENCES lesson_plans(id) ON DELETE CASCADE,
+  FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE,
+  UNIQUE(plan_id, resource_id, section)
+);
+CREATE INDEX IF NOT EXISTS idx_plan_resources_plan ON plan_resources(plan_id);
+CREATE INDEX IF NOT EXISTS idx_plan_resources_resource ON plan_resources(resource_id);
+
 -- 反馈/报告
 CREATE TABLE IF NOT EXISTS feedbacks (
   id TEXT PRIMARY KEY,

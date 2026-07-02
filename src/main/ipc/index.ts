@@ -100,6 +100,16 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('lessonPlan:clone', (_e, sourcePlanId, input) =>
     tryRun(() => lessonPlanRepo.clonePlan(sourcePlanId, input))
   )
+  // 教案-资源结构化关联（G13）
+  ipcMain.handle('lessonPlan:listResources', (_e, planId) =>
+    tryRun(() => lessonPlanRepo.listResources(planId))
+  )
+  ipcMain.handle('lessonPlan:attachResource', (_e, planId, input) =>
+    tryRun(() => lessonPlanRepo.attachResource(planId, input))
+  )
+  ipcMain.handle('lessonPlan:detachResource', (_e, planId, resourceId, section) =>
+    tryRun(() => lessonPlanRepo.detachResource(planId, resourceId, section))
+  )
   ipcMain.handle('lessonPlan:generateDraft', async (e, versionId, durationMinutes) =>
     tryRunAsync(async () => {
       const win = BrowserWindow.fromWebContents(e.sender) ?? getMainWindow()
