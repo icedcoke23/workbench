@@ -38,6 +38,7 @@ import type {
   Todo,
   VersionMeta,
   DocLinkWithLesson,
+  PlanDocLink,
   WeChatSettings,
   ScheduleParseResult,
   ScratchSettings
@@ -62,7 +63,7 @@ export const API_METHODS: Record<string, string[]> = {
   dashboard: ['get'],
   data: ['export', 'importFromFile', 'pickImportFile', 'saveExportToFile'],
   studentHistory: ['get'],
-  doc: ['openUrl', 'linkToLesson', 'listLinks', 'listAll', 'removeLink'],
+  doc: ['openUrl', 'linkToLesson', 'listLinks', 'listAll', 'removeLink', 'listByPlan', 'linkToPlan'],
   file: ['pickImage', 'saveAvatar', 'readImageBase64']
 }
 
@@ -226,6 +227,8 @@ export interface WorkbenchAPI {
     listLinks: (lessonId: ID) => Promise<Result<Array<{ id: ID; url: string; title: string }>>>
     listAll: () => Promise<Result<DocLinkWithLesson[]>>
     removeLink: (id: ID) => Promise<Result<void>>
+    listByPlan: (planId: ID) => Promise<Result<PlanDocLink[]>>
+    linkToPlan: (planId: ID, url: string, title: string) => Promise<Result<PlanDocLink>>
   }
   // 文件
   file: {

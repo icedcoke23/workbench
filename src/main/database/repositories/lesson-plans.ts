@@ -181,6 +181,16 @@ export function clonePlan(sourcePlanId: string, input: LessonPlanCloneInput): Le
       .run(uuid(), cloned.id, pr.resourceId, pr.section, pr.sortOrder, pr.note)
   }
 
+  // 一并复制教案级文档挂载（G17）：派生教案复用源教案的外部文档/URL
+  const sourceDocs = db()
+    .prepare(`SELECT url, title FROM doc_links WHERE plan_id = ?`)
+    .all(sourcePlanId) as Array<{ url: string; title: string | null }>
+  for (const d of sourceDocs) {
+    db()
+      .prepare(`INSERT INTO doc_links (id, plan_id, url, title) VALUES (?, ?, ?, ?)`)
+      .run(uuid(), cloned.id, d.url, d.title)
+  }
+
   return get(cloned.id)!
 }
 

@@ -349,6 +349,11 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('doc:listLinks', (_e, lessonId) => tryRun(() => docRepo.listByLesson(lessonId)))
   ipcMain.handle('doc:listAll', () => tryRun(() => docRepo.listAll()))
   ipcMain.handle('doc:removeLink', (_e, id) => tryRun(() => docRepo.remove(id)))
+  // G17: 教案级文档挂载
+  ipcMain.handle('doc:listByPlan', (_e, planId) => tryRun(() => docRepo.listByPlan(planId)))
+  ipcMain.handle('doc:linkToPlan', (_e, planId, url, title) =>
+    tryRun(() => docRepo.linkPlan(planId, url, title))
+  )
 
   // ============ 文件 ============
   ipcMain.handle('file:pickImage', async () =>

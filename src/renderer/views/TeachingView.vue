@@ -190,12 +190,13 @@
             </div>
             <a-spin :spinning="prepDocsLoading" size="small">
               <a-empty
-                v-if="!prepDocsLoading && prepDocs.length === 0"
+                v-if="!prepDocsLoading && combinedPrepDocs.length === 0"
                 description="暂无关联文档"
                 :image="undefined"
               />
               <div v-else class="prep-doc-list">
-                <div v-for="d in prepDocs" :key="d.id" class="prep-doc-item">
+                <div v-for="d in combinedPrepDocs" :key="d.id" class="prep-doc-item">
+                  <a-tag v-if="d.isPlan" color="cyan" size="small">教案级</a-tag>
                   <a class="prep-doc-title" @click="openDocLink(d.url)">
                     {{ d.title || d.url }}
                   </a>
@@ -562,6 +563,7 @@ import type {
   Lesson,
   LessonInput,
   LessonPlan,
+  PlanDocLink,
   PlanResource,
   ResourceType,
   Student,
@@ -794,6 +796,13 @@ const prepDocsLoading = ref(false)
 const prepPlan = ref<LessonPlan | null>(null)
 const prepPlanLoading = ref(false)
 const prepPlanActiveKeys = ref<string[]>(['process'])
+// 教案级文档（G17）：挂载到教案、跨课次继承的外部文档
+const prepPlanDocs = ref<PlanDocLink[]>([])
+/** 合并展示：教案级文档（继承）+ 课次级文档，教案级在前并标注 */
+const combinedPrepDocs = computed(() => [
+  ...prepPlanDocs.value.map((d) => ({ id: d.id, url: d.url, title: d.title, isPlan: true })),
+  ...prepDocs.value.map((d) => ({ id: d.id, url: d.url, title: d.title, isPlan: false }))
+])
 // 教案关联的结构化素材（G13）：授课侧一键预览/打开
 const prepPlanResources = ref<PlanResource[]>([])
 const prepPlanResourcesLoading = ref(false)
@@ -1058,6 +1067,7 @@ async function loadPrepContext(): Promise<void> {
   prepPlan.value = null
   prepDocs.value = []
   prepPlanResources.value = []
+  prepPlanDocs.value = []
   if (!versionId && !lessonId) return
 
   // 并行加载，互不阻塞
@@ -1072,13 +1082,16 @@ async function loadPrepContext(): Promise<void> {
     call(window.api.lessonPlan.getByVersion(versionId))
       .then((p) => {
         prepPlan.value = p ?? null
-        // 教案存在时并行拉取关联素材（G13）
+        // 教案存在时并行拉取关联素材（G13）与教案级文档（G17）
         if (p) {
           prepPlanResourcesLoading.value = true
           call(window.api.lessonPlan.listResources(p.id))
             .then((rs) => { prepPlanResources.value = rs })
             .catch(() => { prepPlanResources.value = [] })
             .finally(() => { prepPlanResourcesLoading.value = false })
+          call(window.api.doc.listByPlan(p.id))
+            .then((docs) => { prepPlanDocs.value = docs })
+            .catch(() => { prepPlanDocs.value = [] })
         }
       })
       .catch(() => { prepPlan.value = null })

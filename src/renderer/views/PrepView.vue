@@ -1000,6 +1000,42 @@
               placeholder="课后填写：哪些环节效果好、哪些需改进"
             />
           </a-collapse-panel>
+          <a-collapse-panel key="docs" header="关联文档（教案级）">
+            <div class="segment-toolbar">
+              <a-input
+                v-model:value="planDocForm.url"
+                placeholder="文档链接（如语雀/PPT/工作表 URL）"
+                style="width: 280px"
+                @press-enter="addPlanDoc"
+              />
+              <a-input
+                v-model:value="planDocForm.title"
+                placeholder="标题（可选）"
+                style="width: 180px"
+                @press-enter="addPlanDoc"
+              />
+              <a-button size="small" type="primary" @click="addPlanDoc">
+                <PlusOutlined /> 添加
+              </a-button>
+            </div>
+            <div v-if="allPlanDocs.length" class="plan-doc-list">
+              <div v-for="d in allPlanDocs" :key="d.id" class="plan-doc-item">
+                <LinkOutlined class="plan-doc-icon" />
+                <a class="plan-doc-link" @click="openPlanDoc(d.url)">
+                  {{ d.title || d.url }}
+                </a>
+                <a-button
+                  type="text"
+                  size="small"
+                  class="plan-doc-remove"
+                  @click="removePlanDoc(d)"
+                >
+                  <CloseOutlined />
+                </a-button>
+              </div>
+            </div>
+            <span v-else class="plan-doc-empty">暂无关联文档，可挂载语雀/PPT/工作表等外部资料到教案，跨课次复用</span>
+          </a-collapse-panel>
         </a-collapse>
 
         <!-- 备课就绪度清单（G15）：随编辑实时刷新，逐项引导补齐 -->
@@ -1371,7 +1407,8 @@ import type {
   PrepStage,
   ScratchSavePayload,
   VersionMeta,
-  DocLinkWithLesson
+  DocLinkWithLesson,
+  PlanDocLink
 } from '@shared/types'
 
 // ============ 公共 ============
@@ -1481,6 +1518,17 @@ const allPlanResources = computed<PlanResource[]>(() => [
   ...planResources.value,
   ...pendingAttachResources.value
 ])
+// 教案级文档挂载（G17）：已保存的关联文档
+const planDocs = ref<PlanDocLink[]>([])
+// 新建态未保存时缓存的待挂载文档（id 以 pending: 前缀），保存后批量 linkToPlan
+const pendingPlanDocs = ref<PlanDocLink[]>([])
+/** 编辑器内展示的全部文档（已挂载 + 待挂载） */
+const allPlanDocs = computed<PlanDocLink[]>(() => [
+  ...planDocs.value,
+  ...pendingPlanDocs.value
+])
+// 文档输入表单
+const planDocForm = reactive({ url: '', title: '' })
 // AI 辅助生成教案草稿
 const planAiGenerating = ref(false)
 const aiConfigured = ref(false)
@@ -1821,6 +1869,10 @@ function resetPlanForm(): void {
   planReviewText.value = ''
   planResources.value = []
   pendingAttachResources.value = []
+  planDocs.value = []
+  pendingPlanDocs.value = []
+  planDocForm.url = ''
+  planDocForm.title = ''
 }
 
 function openNewPlanModal(): void {
@@ -2041,6 +2093,64 @@ async function removePlanResource(pr: PlanResource): Promise<void> {
   }
 }
 
+// ============ 教案级文档挂载（G17） ============
+/**
+ * 添加文档到当前教案：编辑态直接 linkToPlan 持久化；
+ * 新建态缓存到 pendingPlanDocs，submitPlan 后批量挂载。
+ */
+async function addPlanDoc(): Promise<void> {
+  const url = planDocForm.url.trim()
+  if (!url) {
+    message.warning('请填写文档链接')
+    return
+  }
+  const title = planDocForm.title.trim() || url
+  if (editingPlanId.value) {
+    try {
+      const doc = await call(window.api.doc.linkToPlan(editingPlanId.value, url, title))
+      planDocs.value = [...planDocs.value, doc]
+    } catch (e) {
+      message.error(`关联文档失败：${String(e instanceof Error ? e.message : e)}`)
+      return
+    }
+  } else {
+    const synthetic: PlanDocLink = {
+      id: `pending:${Date.now()}`,
+      planId: '',
+      url,
+      title,
+      createdAt: new Date().toISOString()
+    }
+    pendingPlanDocs.value = [...pendingPlanDocs.value, synthetic]
+  }
+  planDocForm.url = ''
+  planDocForm.title = ''
+}
+
+/** 移除文档：编辑态调用 removeLink，新建态从 pending 列表移除 */
+async function removePlanDoc(doc: PlanDocLink): Promise<void> {
+  if (doc.id.startsWith('pending:')) {
+    pendingPlanDocs.value = pendingPlanDocs.value.filter((d) => d.id !== doc.id)
+    return
+  }
+  try {
+    await call(window.api.doc.removeLink(doc.id))
+  } catch (e) {
+    message.error(`移除文档失败：${String(e instanceof Error ? e.message : e)}`)
+    return
+  }
+  planDocs.value = planDocs.value.filter((d) => d.id !== doc.id)
+}
+
+/** 在系统浏览器打开文档链接 */
+async function openPlanDoc(url: string): Promise<void> {
+  try {
+    await call(window.api.doc.openUrl(url))
+  } catch (e) {
+    message.error(`打开文档失败：${String(e instanceof Error ? e.message : e)}`)
+  }
+}
+
 /** 从版本入口打开教案编辑器：自动加载已有教案内容，无则新建 */
 async function openPlanForVersion(versionId: string): Promise<void> {
   planEditorIsEdit.value = false
@@ -2063,6 +2173,8 @@ async function openPlanForVersion(versionId: string): Promise<void> {
       planForm.durationMinutes = existing.durationMinutes ?? null
       // 加载已挂载的结构化素材 chip
       planResources.value = await call(window.api.lessonPlan.listResources(existing.id))
+      // 加载教案级文档（G17）
+      planDocs.value = await call(window.api.doc.listByPlan(existing.id))
     }
   } catch (e) {
     message.error(`加载教案失败：${String(e instanceof Error ? e.message : e)}`)
@@ -2107,6 +2219,10 @@ async function onPlanVersionChange(versionId: string): Promise<void> {
       planForm.process = existing.process ?? ''
       planForm.reflection = existing.reflection ?? ''
       planForm.durationMinutes = existing.durationMinutes ?? null
+      // 同步加载该教案的文档（G17）
+      editingPlanId.value = existing.id
+      planDocs.value = await call(window.api.doc.listByPlan(existing.id))
+      pendingPlanDocs.value = []
     } else {
       planEditorIsEdit.value = false
       planForm.title = ''
@@ -2116,6 +2232,9 @@ async function onPlanVersionChange(versionId: string): Promise<void> {
       planForm.process = ''
       planForm.reflection = ''
       planForm.durationMinutes = null
+      editingPlanId.value = null
+      planDocs.value = []
+      pendingPlanDocs.value = []
     }
   } catch {
     // 忽略，用户可继续手动填写
@@ -2162,6 +2281,20 @@ async function submitPlan(): Promise<void> {
         message.error(`素材关联失败：${String(e instanceof Error ? e.message : e)}`)
       }
       pendingAttachResources.value = []
+    }
+    // 新建态缓存的待挂载文档（G17）：保存成功后批量 linkToPlan
+    if (pendingPlanDocs.value.length > 0) {
+      try {
+        const linked: PlanDocLink[] = []
+        for (const d of pendingPlanDocs.value) {
+          const doc = await call(window.api.doc.linkToPlan(saved.id, d.url, d.title ?? ''))
+          linked.push(doc)
+        }
+        planDocs.value = linked
+      } catch (e) {
+        message.error(`文档关联失败：${String(e instanceof Error ? e.message : e)}`)
+      }
+      pendingPlanDocs.value = []
     }
     message.success(wasEdit ? '教案已保存' : '教案已创建')
     planEditorVisible.value = false
@@ -3443,6 +3576,48 @@ onUnmounted(() => {
 .plan-readiness-item.is-missing {
   color: #874d00;
   background: #fff7e6;
+}
+
+/* 教案级文档挂载（G17） */
+.plan-doc-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.plan-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #f6f8fa;
+  border-radius: 4px;
+}
+.plan-doc-icon {
+  color: #874d00;
+  font-size: 12px;
+}
+.plan-doc-link {
+  flex: 1;
+  color: #1677ff;
+  cursor: pointer;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-doc-link:hover {
+  text-decoration: underline;
+}
+.plan-doc-remove {
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+.plan-doc-empty {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #9ca3af;
 }
 
 /* 教案模板库 */

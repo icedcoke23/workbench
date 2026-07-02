@@ -187,15 +187,19 @@ CREATE TABLE IF NOT EXISTS feedbacks (
 );
 CREATE INDEX IF NOT EXISTS idx_feedbacks_class ON feedbacks(class_id);
 
--- 文档链接（语雀等关联到课次）
+-- 文档链接（语雀等关联到课次 / 教案）
 CREATE TABLE IF NOT EXISTS doc_links (
   id TEXT PRIMARY KEY,
   lesson_id TEXT,
+  plan_id TEXT,
   url TEXT NOT NULL,
   title TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE
+  FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE,
+  FOREIGN KEY (plan_id) REFERENCES lesson_plans(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_doc_links_lesson ON doc_links(lesson_id);
+CREATE INDEX IF NOT EXISTS idx_doc_links_plan ON doc_links(plan_id);
 
 -- 设置（键值存储）
 CREATE TABLE IF NOT EXISTS settings (

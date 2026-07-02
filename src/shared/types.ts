@@ -490,6 +490,18 @@ export interface DocLinkWithLesson {
   lesson_start_time: string | null
 }
 
+/**
+ * 教案级文档关联（G17）：把外部文档/URL（语雀、PPT、工作表等）挂载到教案，
+ * 跨课次复用，避免每个课次重复挂载。与 per-lesson 的 doc_links 双轨共存。
+ */
+export interface PlanDocLink {
+  id: ID
+  planId: ID
+  url: string
+  title: string | null
+  createdAt: string
+}
+
 // ============ 菜单 / 快捷键 ============
 export type ViewName =
   | 'dashboard'

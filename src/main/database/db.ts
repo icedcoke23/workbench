@@ -28,6 +28,8 @@ export function initDatabase(dbPath: string): DB {
   migrateLessonsAchievement(db)
   // 幂等迁移：为 lesson_plans 表补充 parent_plan_id 列（教案克隆血统追踪）
   migrateLessonPlansParent(db)
+  // 幂等迁移：为 doc_links 表补充 plan_id 列（教案级文档挂载）
+  migrateDocLinksPlanId(db)
 
   // 先暴露实例，种子数据初始化内部需要通过 db() 取实例
   dbInstance = db
@@ -104,6 +106,19 @@ function migrateLessonPlansParent(db: DB): void {
   const names = new Set(cols.map((c) => c.name))
   if (!names.has('parent_plan_id')) {
     db.exec(`ALTER TABLE lesson_plans ADD COLUMN parent_plan_id TEXT`)
+  }
+}
+
+/**
+ * 幂等迁移：为 doc_links 表补充 plan_id 列（G17 教案级文档挂载）。
+ * 已存在的 doc_links 表仅有 lesson_id，需 ALTER 追加 plan_id 以支持把
+ * 外部文档/URL（语雀、PPT、工作表等）关联到教案而非课次，便于跨课次复用。
+ */
+function migrateDocLinksPlanId(db: DB): void {
+  const cols = db.prepare(`PRAGMA table_info(doc_links)`).all() as Array<{ name: string }>
+  const names = new Set(cols.map((c) => c.name))
+  if (!names.has('plan_id')) {
+    db.exec(`ALTER TABLE doc_links ADD COLUMN plan_id TEXT`)
   }
 }
 
