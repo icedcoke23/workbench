@@ -113,6 +113,13 @@
         <div class="tab-toolbar">
           <span class="section-title">教案</span>
           <a-space>
+            <a-input-search
+              v-model:value="planKeyword"
+              placeholder="搜索教案（标题/目标/重难点/过程/反思/版本名/点子）"
+              style="width: 360px"
+              allow-clear
+              @search="loadPlans"
+            />
             <a-button @click="loadPlans"><ReloadOutlined /> 刷新</a-button>
             <a-button @click="openTemplateGallery"><CopyOutlined /> 从模板新建</a-button>
             <a-button type="primary" @click="openNewPlanModal"><PlusOutlined /> 新建教案</a-button>
@@ -1099,6 +1106,7 @@ async function removeVersion(versionId: string): Promise<void> {
 // ============ 教案 ============
 const plans = ref<LessonPlan[]>([])
 const plansLoading = ref(false)
+const planKeyword = ref('')
 // 备课进度看板（G6-4）
 const prepOverview = ref<PrepOverview | null>(null)
 const prepOverviewLoading = ref(false)
@@ -1172,7 +1180,8 @@ const planVersionOptions = computed(() => {
 async function loadPlans(): Promise<void> {
   plansLoading.value = true
   try {
-    plans.value = await call(window.api.lessonPlan.list())
+    const kw = planKeyword.value.trim()
+    plans.value = await call(window.api.lessonPlan.list(kw ? { keyword: kw } : undefined))
   } catch (e) {
     message.error(`加载教案失败：${String(e instanceof Error ? e.message : e)}`)
   } finally {

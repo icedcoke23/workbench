@@ -41,17 +41,33 @@ function mapRow(r: JoinedRow): LessonPlan {
   }
 }
 
-/** 列出全部教案，可按 ideaId 过滤；带版本名与点子标题 */
-export function list(q?: { ideaId?: string }): LessonPlan[] {
+/** 列出全部教案，可按 ideaId 过滤、按 keyword 全文搜索；带版本名与点子标题 */
+export function list(q?: { ideaId?: string; keyword?: string }): LessonPlan[] {
   let sql = `SELECT lp.*, iv.version_name, i.title AS idea_title, i.id AS idea_id
              FROM lesson_plans lp
              JOIN idea_versions iv ON iv.id = lp.idea_version_id
              JOIN ideas i ON i.id = iv.idea_id`
+  const where: string[] = []
   const params: unknown[] = []
   if (q?.ideaId) {
-    sql += ` WHERE iv.idea_id = ?`
+    where.push(`iv.idea_id = ?`)
     params.push(q.ideaId)
   }
+  if (q?.keyword && q.keyword.trim()) {
+    where.push(`(
+      lp.title LIKE ? OR
+      lp.objectives LIKE ? OR
+      lp.key_points LIKE ? OR
+      lp.preparation LIKE ? OR
+      lp.process LIKE ? OR
+      lp.reflection LIKE ? OR
+      iv.version_name LIKE ? OR
+      i.title LIKE ?
+    )`)
+    const kw = `%${q.keyword.trim()}%`
+    params.push(kw, kw, kw, kw, kw, kw, kw, kw)
+  }
+  if (where.length > 0) sql += ` WHERE ` + where.join(' AND ')
   sql += ` ORDER BY lp.updated_at DESC`
   return (db().prepare(sql).all(...params) as JoinedRow[]).map(mapRow)
 }

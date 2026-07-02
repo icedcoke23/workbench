@@ -108,7 +108,7 @@ export interface WorkbenchAPI {
   }
   // 教案
   lessonPlan: {
-    list: (q?: { ideaId?: ID }) => Promise<Result<LessonPlan[]>>
+    list: (q?: { ideaId?: ID; keyword?: string }) => Promise<Result<LessonPlan[]>>
     get: (id: ID) => Promise<Result<LessonPlan>>
     getByVersion: (versionId: ID) => Promise<Result<LessonPlan | null>>
     upsert: (input: LessonPlanInput) => Promise<Result<LessonPlan>>
