@@ -161,6 +161,10 @@ export interface Lesson {
   reflection?: string | null
   /** 反思填写时间（ISO），为空表示未填写 */
   reflectedAt?: string | null
+  /** AI 教学目标达成度评估全文 */
+  achievementAssessment?: string | null
+  /** 评估生成时间（ISO），为空表示未生成 */
+  assessmentAt?: string | null
 }
 
 /** 备课进度看板：跨点子/版本的备课完成情况汇总 */

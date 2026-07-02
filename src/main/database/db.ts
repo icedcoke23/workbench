@@ -22,9 +22,10 @@ export function initDatabase(dbPath: string): DB {
   // 执行建表脚本
   db.exec(schemaSql)
 
-  // 幂等迁移：为已存在的 lessons 表补充 per-lesson 反思列
+  // 幂等迁移：为已存在的 lessons 表补充 per-lesson 反思列与 AI 达成度评估列
   // （CREATE TABLE IF NOT EXISTS 不会为已建表追加列，需 ALTER TABLE）
   migrateLessonsReflection(db)
+  migrateLessonsAchievement(db)
 
   // 先暴露实例，种子数据初始化内部需要通过 db() 取实例
   dbInstance = db
@@ -73,6 +74,21 @@ function migrateLessonsReflection(db: DB): void {
   }
   if (!names.has('reflected_at')) {
     db.exec(`ALTER TABLE lessons ADD COLUMN reflected_at DATETIME`)
+  }
+}
+
+/**
+ * 幂等迁移：为 lessons 表追加 AI 教学目标达成度评估列。
+ * achievement_assessment 存评估全文，assessment_at 存生成时间。
+ */
+function migrateLessonsAchievement(db: DB): void {
+  const cols = db.prepare(`PRAGMA table_info(lessons)`).all() as Array<{ name: string }>
+  const names = new Set(cols.map((c) => c.name))
+  if (!names.has('achievement_assessment')) {
+    db.exec(`ALTER TABLE lessons ADD COLUMN achievement_assessment TEXT`)
+  }
+  if (!names.has('assessment_at')) {
+    db.exec(`ALTER TABLE lessons ADD COLUMN assessment_at DATETIME`)
   }
 }
 
